@@ -17,7 +17,6 @@ dist/
 .env
 .vim
 .nvimrc
-.vscode
 
 qlib/VERSION.txt
 qlib/data/_libs/expanding.cpp
@@ -44,7 +43,6 @@ tags
 
 .pytest_cache/
 .mypy_cache/
-.vscode/
 
 *.swp
 

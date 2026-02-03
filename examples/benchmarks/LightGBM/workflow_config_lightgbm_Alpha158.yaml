@@ -1,8 +1,8 @@
 qlib_init:
-    provider_uri: "~/.qlib/qlib_data/cn_data"
+    provider_uri: "D:/Pengxin/CodeBase/Quant/QuantDataBank/qlib_bin"
     region: cn
 market: &market csi300
-benchmark: &benchmark SH000300
+benchmark: &benchmark GC=F
 data_handler_config: &data_handler_config
     start_time: 2008-01-01
     end_time: 2020-08-01
