@@ -72,7 +72,7 @@ class TradeCalendarManager:
         _, _, _start_index, _end_index = Cal.locate_index(start_time, end_time, freq=freq, future=True)
         self.start_index = _start_index
         self.end_index = _end_index
-        self.trade_len = _end_index - _start_index + 1
+        self.trade_len = _end_index - _start_index
         self.trade_step = 0
 
     def finished(self) -> bool:

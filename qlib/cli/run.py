@@ -82,25 +82,19 @@ def render_template(config_path: str) -> str:
     return rendered_content
 
 
-# workflow handler function
-def workflow(config_path, experiment_name="workflow", uri_folder="mlruns"):
+def load_config(config_path):
     """
-    This is a Qlib CLI entrance.
-    User can run the whole Quant research workflow defined by a configure file
-    - the code is located here ``qlib/cli/run.py``
+    Load and process the configuration from the given config file path.
 
-    User can specify a base_config file in your workflow.yml file by adding "BASE_CONFIG_PATH".
-    Qlib will load the configuration in BASE_CONFIG_PATH first, and the user only needs to update the custom fields
-    in their own workflow.yml file.
+    Parameters
+    ----------
+    config_path : str
+        Path to the configuration file.
 
-    For examples:
-
-        qlib_init:
-            provider_uri: "~/.qlib/qlib_data/cn_data"
-            region: cn
-        BASE_CONFIG_PATH: "workflow_config_lightgbm_Alpha158_csi500.yaml"
-        market: csi300
-
+    Returns
+    -------
+    dict
+        The processed configuration dictionary.
     """
     # Render the template
     rendered_yaml = render_template(config_path)
@@ -134,6 +128,31 @@ def workflow(config_path, experiment_name="workflow", uri_folder="mlruns"):
 
     # config the `sys` section
     sys_config(config, config_path)
+
+    return config
+
+
+# workflow handler function
+def workflow(config_path, experiment_name="workflow", uri_folder="mlruns"):
+    """
+    This is a Qlib CLI entrance.
+    User can run the whole Quant research workflow defined by a configure file
+    - the code is located here ``qlib/cli/run.py``
+
+    User can specify a base_config file in your workflow.yml file by adding "BASE_CONFIG_PATH".
+    Qlib will load the configuration in BASE_CONFIG_PATH first, and the user only needs to update the custom fields
+    in their own workflow.yml file.
+
+    For examples:
+
+        qlib_init:
+            provider_uri: "~/.qlib/qlib_data/cn_data"
+            region: cn
+        BASE_CONFIG_PATH: "workflow_config_lightgbm_Alpha158_csi500.yaml"
+        market: csi300
+
+    """
+    config = load_config(config_path)
 
     if "exp_manager" in config.get("qlib_init"):
         qlib.init(**config.get("qlib_init"))
