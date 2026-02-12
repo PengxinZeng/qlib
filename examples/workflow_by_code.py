@@ -8,48 +8,10 @@ from qlib.utils import init_instance_by_config
 from qlib.workflow import R
 from qlib.contrib.report import analysis_model, analysis_position
 import qlib.cli.run
+from qlib.workflow.record_temp import SignalRecord, PortAnaRecord, SigAnaRecord
 
 
-def backtest_analysis(config_path, recorder_id, experiment_id):
-    config = qlib.cli.run.load_config(config_path)
-    qlib.init(**config.get("qlib_init"))
-
-
-    data_handler_config = config.get("data_handler_config", {})
-
-    task = config.get("task", {})
-
-    # model initialization
-    model = init_instance_by_config(task["model"])
-    dataset = init_instance_by_config(task["dataset"])
-
-    # start exp to train model
-    # with R.start(experiment_name="train_model"):
-    #     R.log_params(**flatten_dict(task))
-    #     model.fit(dataset)
-    #     R.save_objects(trained_model=model)
-    #     rid = R.get_recorder().id
-
-    ###################################
-    # prediction, backtest & analysis
-    ###################################
-    port_analysis_config = config.get("port_analysis_config", {})
-
-    # backtest and analysis
-    # with R.start(experiment_name="backtest_analysis"):
-    #     recorder = R.get_recorder(recorder_id=rid, experiment_name="train_model")
-    #     model = recorder.load_object("trained_model")
-
-    #     # prediction
-    #     recorder = R.get_recorder()
-    #     ba_rid = recorder.id
-    #     sr = SignalRecord(model, dataset, recorder)
-    #     sr.generate()
-
-    #     # backtest & analysis
-    #     par = PortAnaRecord(recorder, port_analysis_config, "day")
-    #     par.generate()
-
+def draw_analysis_figures(recorder_id, experiment_id, dataset):
     # analyze graphs
     recorder = R.get_recorder(recorder_id=recorder_id, experiment_id=experiment_id)
     print(recorder)
@@ -57,6 +19,19 @@ def backtest_analysis(config_path, recorder_id, experiment_id):
     report_normal_df = recorder.load_object("portfolio_analysis/report_normal_1day.pkl")
     positions = recorder.load_object("portfolio_analysis/positions_normal_1day.pkl")
     analysis_df = recorder.load_object("portfolio_analysis/port_analysis_1day.pkl")
+
+    csv_dict = {
+        "pred_df": pred_df,
+        "report_normal_df": report_normal_df,
+        # "positions": positions,
+        "analysis_df": analysis_df,
+    }
+    save_root = os.path.join(recorder._uri.replace('file:', ''), recorder.experiment_id, recorder.id, "analysis_csvs")
+    os.makedirs(save_root, exist_ok=True)
+    for csv_type, csv_data in csv_dict.items():
+        save_path = os.path.join(save_root, f"{csv_type}.csv")
+        print(f"Save {csv_type} to local file: {save_path}")
+        csv_data.to_csv(save_path, index=True)
 
     # analysis position
     # report
@@ -102,10 +77,50 @@ def backtest_analysis(config_path, recorder_id, experiment_id):
                 # py.plot(_fig, auto_open=True)
 
 
+def backtest(recorder_id, experiment_id, dataset, port_analysis_config):
+    # backtest and analysis
+    with R.start(experiment_name="backtest_analysis"):
+        recorder = R.get_recorder(recorder_id=recorder_id, experiment_id=experiment_id)
+        model = recorder.load_object("params.pkl")
+
+        # prediction
+        recorder = R.get_recorder()
+        new_recorder_id = recorder.id
+        new_experiment_id = recorder.experiment_id
+        sr = SignalRecord(model, dataset, recorder)
+        sr.generate()
+
+        # backtest & analysis
+        par = PortAnaRecord(recorder, port_analysis_config, "day")
+        par.generate()
+    return new_recorder_id, new_experiment_id
+
+
+def backtest_analysis(config_path, recorder_id, experiment_id):
+    config = qlib.cli.run.load_config(config_path)
+    task = config.get("task", {})
+
+    # model initialization
+    qlib.init(**config.get("qlib_init"))
+    model = init_instance_by_config(task["model"])
+    dataset = init_instance_by_config(task["dataset"])
+
+    # start exp to train model
+    # with R.start(experiment_name="train_model"):
+    #     R.log_params(**flatten_dict(task))
+    #     model.fit(dataset)
+    #     R.save_objects(trained_model=model)
+    #     rid = R.get_recorder().id
+
+    recorder_id, experiment_id = backtest(
+        recorder_id=recorder_id, experiment_id=experiment_id, dataset=dataset, port_analysis_config=config.get("port_analysis_config", {}))
+    draw_analysis_figures(recorder_id=recorder_id, experiment_id=experiment_id, dataset=dataset)
+
+
 def main():
     backtest_analysis(
         config_path="examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml", 
-        recorder_id="c1b25a3c949c455f8f56ed5febddb1b8", 
+        recorder_id="aeaecb83c65545df83c543dce2f13a9d", 
         experiment_id="724594780217528450",
     )
 

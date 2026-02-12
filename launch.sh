@@ -27,7 +27,7 @@ python D:/Pengxin/CodeBase/Quant/qlib/scripts/dump_bin.py dump_all `
     --date_field_name date
 
 git add .
-git commit --amend --no-edit
+git commit -m "Enable backtest_analysis"
 git push origin main 
 
 git config --global user.email zengpengxin.gm@gmail.com

@@ -2,8 +2,7 @@ import akshare as ak
 import pandas as pd
 import os
 
-source_path = "D:/Pengxin/CodeBase/Quant/qlib/gold_source"
-os.makedirs(source_path, exist_ok=True)
+source_path = "~/.qlib/qlib_data/gold_source"
 # 尝试获取伦敦金的历史行情（新浪源）
 try:
     # XAU 是伦敦金的国际通用代码
@@ -31,5 +30,7 @@ gold_data = pd.DataFrame({
 })
 
 # 4. 保存为 CSV (Qlib 识别文件名作为代码)
-gold_data.to_csv(os.path.join(source_path, "XAU.csv"), index=False)
-print(f"数据处理完成，共 {len(gold_data)} 行。已保存至: {source_path}/XAU.csv")
+save_path = os.path.join(os.path.expanduser(source_path), "XAU.csv")
+os.makedirs(os.path.dirname(save_path), exist_ok=True)
+gold_data.to_csv(save_path, index=False)
+print(f"数据处理完成，共 {len(gold_data)} 行。已保存至: {save_path}")

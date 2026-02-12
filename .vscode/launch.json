@@ -40,7 +40,7 @@
             // "module": "qlib.cli.run", 
             "program": "qlib/cli/run.py",
             "args": [
-                "examples/benchmarks/LightGBM/workflow_config_lightgbm_gold.yaml"
+                "examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
