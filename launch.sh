@@ -1,5 +1,5 @@
 
-python -m qlib.cli.data qlib_data --target_dir D:/Pengxin/CodeBase/Quant/QuantDataBank/qlib_bin --region cn
+python -m qlib.cli.data qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn
 python scripts/check_data_health.py check_data --qlib_dir D:/Pengxin/CodeBase/Quant/QuantDataBank/gold_source
 
 qrun benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml

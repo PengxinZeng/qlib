@@ -38,7 +38,7 @@
             "type": "python",
             "request": "launch",
             // "module": "qlib.cli.run", 
-            "program": "qlib/cli/examples.py",
+            "program": "qlib/cli/run.py",
             "args": [
                 "examples/benchmarks/LightGBM/workflow_config_lightgbm_gold.yaml"
             ],
