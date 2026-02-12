@@ -1,5 +1,5 @@
 qlib_init:
-    provider_uri: "D:/Pengxin/CodeBase/Quant/QuantDataBank/gold_source"
+    provider_uri: "~/.qlib/qlib_data/gold_source"
     region: cn
 market: &market all
 benchmark: &benchmark XAU

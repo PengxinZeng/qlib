@@ -49,7 +49,11 @@ def draw_analysis_figures(recorder_id, experiment_id, dataset):
     fig_list_score_ic = analysis_position.score_ic_graph(pred_label, show_notebook=False)
 
     # model performance
-    fig_list_model_performance = analysis_model.model_performance_graph(pred_label, show_notebook=False)
+    try:
+        fig_list_model_performance = analysis_model.model_performance_graph(pred_label, show_notebook=False)
+    except Exception as e:
+        print(f"Model performance figure generation failed: {e}")
+        fig_list_model_performance = []
     fig_dict = {
         "return": fig_list_return,
         "risk": fig_list_risk,
@@ -113,13 +117,19 @@ def backtest_analysis(config_path, recorder_id, experiment_id):
     #     rid = R.get_recorder().id
 
     recorder_id, experiment_id = backtest(
-        recorder_id=recorder_id, experiment_id=experiment_id, dataset=dataset, port_analysis_config=config.get("port_analysis_config", {}))
+        recorder_id=recorder_id, 
+        experiment_id=experiment_id, 
+        dataset=dataset, 
+        port_analysis_config=config.get("port_analysis_config", {}),
+    )
+    
     draw_analysis_figures(recorder_id=recorder_id, experiment_id=experiment_id, dataset=dataset)
 
 
 def main():
     backtest_analysis(
-        config_path="examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml", 
+        # config_path="examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml", 
+        config_path="examples/benchmarks/LightGBM/workflow_config_lightgbm_gold.yaml", 
         recorder_id="aeaecb83c65545df83c543dce2f13a9d", 
         experiment_id="724594780217528450",
     )
