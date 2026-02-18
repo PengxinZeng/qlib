@@ -34,13 +34,44 @@
             "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Python: Qlib qrun Debug",
+            "name": "Qlib Dump Gold Bin",
+            "type": "python",
+            "request": "launch",
+            "program": "scripts/dump_bin.py",
+            "args": [
+                "dump_all",
+                "--data_path", "~/.qlib/qlib_data/gold_source_debug/",
+                "--qlib_dir", "~/.qlib/qlib_data/gold_source_debug/",
+                "--include_fields", "open,high,low,close,volume,factor",
+                "--date_field_name", "date"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Qlib qrun",
             "type": "python",
             "request": "launch",
             // "module": "qlib.cli.run", 
             "program": "qlib/cli/run.py",
             "args": [
                 "examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false 
+        },
+        {
+            "name": "workflow_by_code",
+            "type": "python",
+            "request": "launch",
+            "program": "examples/workflow_by_code.py",
+            "args": [
+                "backtest_analysis",
+                "examples/benchmarks/LightGBM/workflow_config_lightgbm_gold_weightedTrading.yaml",
+                // "examples/benchmarks/LightGBM/workflow_config_lightgbm_gold.yaml",
+                "aeaecb83c65545df83c543dce2f13a9d",
+                "724594780217528450"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",

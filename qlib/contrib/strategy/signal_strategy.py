@@ -520,3 +520,20 @@ class EnhancedIndexingStrategy(WeightStrategyBase):
             self.logger.info("total holding weight: {:.6f}".format(weight.sum()))
 
         return target_weight_position
+
+class ScoreWeightStrategy(WeightStrategyBase):
+    """
+    A simple weight strategy: 持仓权重正比于 score，score<=0 或 NaN 不持仓，所有正 score 股票权重归一化后乘以 risk_degree。
+    """
+    def __init__(self, score_temperature=0.1, **kwargs):
+        super().__init__(**kwargs)
+        self.score_temperature = score_temperature
+
+    def generate_target_weight_position(self, score, current, trade_start_time, trade_end_time):
+        # score: pd.Series, index为股票代码，值为打分
+        stocks = score.index
+        score = copy.deepcopy(score)
+        score = np.exp(np.concatenate([score.values, np.zeros((1, 1))]) / self.score_temperature)
+        weights = score / score.sum() * self.get_risk_degree(trade_start_time)
+        final_stock_weight = {stock_id: weights[i][0] for i, stock_id in enumerate(stocks)}
+        return {stock: w for stock, w in final_stock_weight.items() if w > 0}

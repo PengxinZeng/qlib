@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 import os
+import fire
 import pandas as pd
 import qlib
 from qlib.utils import init_instance_by_config
@@ -118,7 +119,7 @@ def backtest_analysis(config_path, recorder_id, experiment_id):
 
     recorder_id, experiment_id = backtest(
         recorder_id=recorder_id, 
-        experiment_id=experiment_id, 
+        experiment_id=str(experiment_id), 
         dataset=dataset, 
         port_analysis_config=config.get("port_analysis_config", {}),
     )
@@ -136,4 +137,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    fire.Fire()
+    # main()

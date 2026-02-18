@@ -20,7 +20,7 @@ python scripts/dump_bin.py dump_all \
     --date_field_name date
 
 git add .
-git commit -m "Enable backtest_analysis on gold data"
+git commit -m "ScoreWeightStrategy"
 git push origin main 
 
 git config --global user.email zengpengxin.gm@gmail.com
