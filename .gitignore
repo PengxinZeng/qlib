@@ -49,3 +49,6 @@ tags
 ./pretrain
 .idea/
 .aider*
+
+# comate
+.comate/
