@@ -635,7 +635,7 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ## Code Push
 git add .
-git commit -m "add data collector"
+git commit -m "add index data collector"
 git push origin main
 
 ## TODO：
