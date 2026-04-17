@@ -294,11 +294,11 @@ def analyze_results(portfolio_metric_dict, topk_stocks, k, test_start, test_end,
     total_return = strategy_cumprod - 1
     bench_return = bench_cumprod - 1
 
-    # 复利年化收益：(1+r)^(252/days) - 1
-    annualized_return = strategy_cumprod ** (252 / days) - 1
-    bench_annual = bench_cumprod ** (252 / days) - 1
+    # 单利年化收益：日均收益 * 252（与其他策略一致）
+    annualized_return = report_df["return"].mean() * 252
+    bench_annual = report_df["bench"].mean() * 252
 
-    # 超额收益（复利年化）
+    # 超额收益（单利年化）
     excess_return = annualized_return - bench_annual
 
     # 风险指标
