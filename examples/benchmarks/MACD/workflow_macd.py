@@ -58,7 +58,7 @@ INSTRUMENT_INFO = {
     "SH600309": "万华化学", "SH601012": "隆基绿能", "SH600276": "恒瑞医药",
     "SH600588": "用友网络", "SH601633": "长城汽车", "SH600887": "伊利股份",
     "SZ002415": "海康威视", "SH600104": "上汽集团", "SH601888": "中国中免",
-    "159915": "创业板ETF", "159919": "深100ETF", "159922": "中证500ETF",
+    "159915": "创业板ETF", "159919": "嘉实沪深300ETF", "159922": "中证500ETF",
     "510310": "沪深300ETF", "510180": "上证180ETF", "510880": "红利ETF",
     "512010": "医药ETF", "512100": "中证1000ETF", "512480": "半导体ETF",
     "512690": "酒ETF", "512710": "军工ETF", "513030": "德国ETF",
@@ -132,17 +132,38 @@ def compute_macd_returns_batch(close_df, fast_period=12, slow_period=26, signal_
     return pd.Series(results)
 
 
-def select_topk_stocks(config):
-    """在训练集上用MACD策略选出TopK股票"""
+def select_topk_stocks(config, instruments="all"):
+    """在训练集上用MACD策略选出TopK股票
+
+    Args:
+        config: 配置字典
+        instruments: 股票池，支持:
+            - "all": 所有标的
+            - JSON字符串列表: 如 '["510050","510300"]'
+            - Python列表: 如 ["510050","510300"]
+    """
     print(f"\n{'='*60}")
     print(f"TRAIN: [{config['train_start']} ~ {config['train_end']}]")
     print(f"MACD({config['fast_period']},{config['slow_period']},{config['signal_period']})")
     print(f"{'='*60}")
 
-    inst_dict = D.list_instruments(D.instruments("all"),
-                                    start_time=config["train_start"],
-                                    end_time=config["train_end"])
-    inst_list = list(inst_dict.keys())
+    # 解析 instruments 参数
+    import json
+    if isinstance(instruments, str) and instruments != "all":
+        try:
+            instruments = json.loads(instruments)
+        except json.JSONDecodeError:
+            pass
+
+    if isinstance(instruments, list):
+        inst_list = instruments
+        print(f"标的池: {instruments}")
+    else:
+        inst_dict = D.list_instruments(D.instruments(instruments),
+                                       start_time=config["train_start"],
+                                       end_time=config["train_end"])
+        inst_list = list(inst_dict.keys())
+
     print(f"候选标的: {len(inst_list)} 个")
 
     # 批量加载数据
@@ -615,12 +636,16 @@ def analyze_results(portfolio_metric_dict, topk_stocks, best_k, config, save_dir
     return summary
 
 
-def run(stocks=None, max_k=10):
+def run(stocks=None, max_k=10, instruments="all"):
     """运行MACD TopK策略
 
     Args:
         stocks: 直接指定股票列表，如 '["159919","510300"]'
         max_k: 最大K值（用于K值选择）
+        instruments: 股票池，支持:
+            - "all": 所有标的（默认）
+            - JSON字符串列表: 如 '["510050","510300"]'
+            - Python列表: 如 ["510050","510300"]
     """
     config = load_config()
     qlib.init(provider_uri=config["provider_uri"], region=config["region"])
@@ -638,7 +663,7 @@ def run(stocks=None, max_k=10):
         df_k_results = None
     else:
         # 1. TRAIN: 选股
-        df_stocks = select_topk_stocks(config)
+        df_stocks = select_topk_stocks(config, instruments=instruments)
 
         # 2. VAL: 选K
         best_k, df_k_results = select_best_k(df_stocks, config, max_k=max_k)

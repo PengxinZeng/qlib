@@ -45,5 +45,5 @@
 
 # Code Push
 git add .
-git commit -m "add index data collector"
+git commit -m "MACD-ETF"
 git push origin main

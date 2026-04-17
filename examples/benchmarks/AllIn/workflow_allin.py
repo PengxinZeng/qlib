@@ -86,7 +86,10 @@ def select_topk_stocks(train_start, train_end, instruments="all"):
     Args:
         train_start: 训练开始时间
         train_end: 训练结束时间
-        instruments: 股票池
+        instruments: 股票池，支持:
+            - "all": 所有标的
+            - JSON字符串列表: 如 '["510050","510300"]'
+            - Python列表: 如 ["510050","510300"]
 
     Returns:
         DataFrame: 包含所有股票收益信息的DataFrame
@@ -95,9 +98,20 @@ def select_topk_stocks(train_start, train_end, instruments="all"):
     print(f"选股阶段：在训练集 [{train_start} ~ {train_end}] 中按收益率排序")
     print(f"{'='*60}")
 
-    # 获取所有标的
-    inst_dict = D.list_instruments(D.instruments(instruments), start_time=train_start, end_time=train_end)
-    inst_list = list(inst_dict.keys())
+    # 解析 instruments 参数
+    import json
+    if isinstance(instruments, str) and instruments != "all":
+        try:
+            instruments = json.loads(instruments)
+        except json.JSONDecodeError:
+            pass
+    if isinstance(instruments, list):
+        inst_list = instruments
+        print(f"标的池: {instruments}")
+    else:
+        # 获取所有标的
+        inst_dict = D.list_instruments(D.instruments(instruments), start_time=train_start, end_time=train_end)
+        inst_list = list(inst_dict.keys())
 
     results = []
     for inst in inst_list:
@@ -362,7 +376,10 @@ def run(stocks=None, benchmark=None, max_k=10, top_k=None, instruments="all"):
         benchmark: 基准代码，默认使用配置中的benchmark
         max_k: 最大K值（用于K值选择）
         top_k: 固定K值（跳过K值选择）
-        instruments: 股票池（用于选股）
+        instruments: 股票池，支持:
+            - "all": 所有标的（默认）
+            - JSON字符串列表: 如 '["510050","510300"]'
+            - Python列表: 如 ["510050","510300"]
     """
     config = load_config()
 
