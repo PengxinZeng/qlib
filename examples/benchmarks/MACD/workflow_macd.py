@@ -233,11 +233,16 @@ def select_best_k(df_stocks, config, max_k=10):
     return best_k, df_k_results
 
 
-def run_backtest(df_stocks, best_k, config):
-    """使用MACD TopK策略进行回测"""
+def run_backtest(topk_stocks, config):
+    """使用MACD TopK策略进行回测
+
+    Args:
+        topk_stocks: 股票代码列表
+        config: 配置字典
+    """
     from strategy import MACDStrategy
 
-    topk_stocks = df_stocks.head(best_k)["symbol"].tolist()
+    best_k = len(topk_stocks)
 
     print(f"\n{'='*60}")
     print(f"EVAL: [{config['test_start']} ~ {config['test_end']}]")
@@ -278,7 +283,7 @@ def run_backtest(df_stocks, best_k, config):
         },
     )
 
-    return portfolio_metric_dict, indicator_dict, topk_stocks, strategy
+    return portfolio_metric_dict, indicator_dict, strategy
 
 
 def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
@@ -610,25 +615,44 @@ def analyze_results(portfolio_metric_dict, topk_stocks, best_k, config, save_dir
     return summary
 
 
-def run(max_k=10):
-    """运行完整流程: TRAIN选股 -> VAL选K -> EVAL回测"""
+def run(stocks=None, max_k=10):
+    """运行MACD TopK策略
+
+    Args:
+        stocks: 直接指定股票列表，如 '["159919","510300"]'
+        max_k: 最大K值（用于K值选择）
+    """
     config = load_config()
     qlib.init(provider_uri=config["provider_uri"], region=config["region"])
 
-    # 1. TRAIN: 选股
-    df_stocks = select_topk_stocks(config)
+    # 处理stocks参数
+    if stocks is not None:
+        import json
+        if isinstance(stocks, str):
+            topk_stocks = json.loads(stocks)
+        else:
+            topk_stocks = stocks
+        best_k = len(topk_stocks)
+        print(f"\n直接回测指定股票: {topk_stocks}")
+        df_stocks = None
+        df_k_results = None
+    else:
+        # 1. TRAIN: 选股
+        df_stocks = select_topk_stocks(config)
 
-    # 2. VAL: 选K
-    best_k, df_k_results = select_best_k(df_stocks, config, max_k=max_k)
+        # 2. VAL: 选K
+        best_k, df_k_results = select_best_k(df_stocks, config, max_k=max_k)
+        topk_stocks = df_stocks.head(best_k)["symbol"].tolist()
 
     # 3. EVAL: 回测
-    portfolio_metric_dict, indicator_dict, topk_stocks, strategy = run_backtest(df_stocks, best_k, config)
+    portfolio_metric_dict, indicator_dict, strategy = run_backtest(topk_stocks, config)
 
     # 4. 分析结果
-    save_dir = os.path.join(os.path.dirname(__file__), "results", f"MACDTopK_K{best_k}")
+    save_dir = os.path.join(os.path.dirname(__file__), "results", f"MACD_{'_'.join(topk_stocks)}")
     os.makedirs(save_dir, exist_ok=True)
-    df_stocks.to_csv(os.path.join(save_dir, "stock_selection.csv"), index=False)
-    df_k_results.to_csv(os.path.join(save_dir, "k_selection.csv"), index=False)
+    if df_stocks is not None:
+        df_stocks.to_csv(os.path.join(save_dir, "stock_selection.csv"), index=False)
+        df_k_results.to_csv(os.path.join(save_dir, "k_selection.csv"), index=False)
 
     summary = analyze_results(portfolio_metric_dict, topk_stocks, best_k, config, save_dir, strategy=strategy)
 

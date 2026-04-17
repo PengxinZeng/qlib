@@ -42,3 +42,8 @@
 这是一个多步骤的策略实现任务，按照 Spec-Driven 流程进行。
 ```
 ## RL
+
+# Code Push
+git add .
+git commit -m "add index data collector"
+git push origin main

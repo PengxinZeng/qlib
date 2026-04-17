@@ -276,7 +276,7 @@ def run_backtest(topk_stocks, test_start, test_end, benchmark, account=1000000):
 
 def analyze_results(portfolio_metric_dict, topk_stocks, k, test_start, test_end, save_dir):
     """
-    分析回测结果并生成报告
+    分析回测结果并生成报告（使用复利计算）
     """
     print(f"\n{'='*60}")
     print("分析阶段：生成回测报告")
@@ -285,27 +285,38 @@ def analyze_results(portfolio_metric_dict, topk_stocks, k, test_start, test_end,
     os.makedirs(save_dir, exist_ok=True)
 
     report_df = portfolio_metric_dict.get("1day")[0]
+    days = len(report_df)
 
-    total_return = report_df["return"].sum()
-    annualized_return = report_df["return"].mean() * 252
+    # 复利累计收益：(期末净值/期初净值) - 1
+    strategy_cumprod = (1 + report_df["return"]).prod()
+    bench_cumprod = (1 + report_df["bench"]).prod()
+
+    total_return = strategy_cumprod - 1
+    bench_return = bench_cumprod - 1
+
+    # 复利年化收益：(1+r)^(252/days) - 1
+    annualized_return = strategy_cumprod ** (252 / days) - 1
+    bench_annual = bench_cumprod ** (252 / days) - 1
+
+    # 超额收益（复利年化）
+    excess_return = annualized_return - bench_annual
+
+    # 风险指标
     volatility = report_df["return"].std() * np.sqrt(252)
     sharpe = annualized_return / volatility if volatility > 0 else 0
-    cumulative = report_df["return"].cumsum()
+    cumulative = (1 + report_df["return"]).cumprod() - 1
     max_drawdown = (cumulative.cummax() - cumulative).max()
-
-    bench_return = report_df["bench"].sum()
-    bench_annual = report_df["bench"].mean() * 252
-    excess_return = annualized_return - bench_annual
 
     print(f"\n[回测结果摘要]")
     print(f"  TopK: {k}, 标的: {topk_stocks}")
     print(f"  回测期间: {test_start} ~ {test_end}")
-    print(f"  交易天数: {len(report_df)}")
+    print(f"  交易天数: {days}")
     print(f"\n[收益指标]")
     print(f"  总收益率: {total_return*100:.2f}%")
     print(f"  年化收益: {annualized_return*100:.2f}%")
+    print(f"  基准收益: {bench_return*100:.2f}%")
     print(f"  基准年化: {bench_annual*100:.2f}%")
-    print(f"  超额收益: {excess_return*100:.2f}%")
+    print(f"  超额年化: {excess_return*100:.2f}%")
     print(f"\n[风险指标]")
     print(f"  波动率:   {volatility*100:.2f}%")
     print(f"  夏普比率: {sharpe:.4f}")
@@ -318,8 +329,10 @@ def analyze_results(portfolio_metric_dict, topk_stocks, k, test_start, test_end,
         "topk_stocks": ",".join(topk_stocks),
         "test_start": test_start,
         "test_end": test_end,
+        "days": days,
         "total_return": total_return,
         "annualized_return": annualized_return,
+        "bench_return": bench_return,
         "bench_annual": bench_annual,
         "excess_return": excess_return,
         "volatility": volatility,
@@ -340,64 +353,81 @@ def analyze_results(portfolio_metric_dict, topk_stocks, k, test_start, test_end,
     return summary
 
 
-def run(max_k=10, top_k=None, instruments="all"):
+def run(stocks=None, benchmark=None, max_k=10, top_k=None, instruments="all"):
     """
-    运行完整流程：选股 -> 选择最优K -> 回测 -> 分析
+    运行ALL-IN策略
 
     Args:
+        stocks: 直接指定股票列表，如 '["159919","510300"]'，不为空则直接回测
+        benchmark: 基准代码，默认使用配置中的benchmark
         max_k: 最大K值（用于K值选择）
-        top_k: 固定K值（如果指定则跳过K值选择）
-        instruments: 股票池
+        top_k: 固定K值（跳过K值选择）
+        instruments: 股票池（用于选股）
     """
     config = load_config()
 
     # 初始化Qlib
     qlib.init(provider_uri=config["provider_uri"], region=config["region"])
 
-    # 1. 选股阶段：在训练集上按收益率排序
-    df_stocks = select_topk_stocks(
-        config["train_start"],
-        config["train_end"],
-        instruments=instruments,
-    )
-
-    # 2. 选择最优K值
-    if top_k is None:
-        best_k, df_k_results = select_best_k(
-            df_stocks,
-            config["valid_start"],
-            config["valid_end"],
-            max_k=max_k,
-        )
+    # 处理stocks参数
+    if stocks is not None:
+        import json
+        if isinstance(stocks, str):
+            topk_stocks = json.loads(stocks)
+        else:
+            topk_stocks = stocks
+        print(f"\n直接回测指定股票: {topk_stocks}")
     else:
-        best_k = top_k
-        df_k_results = None
-        print(f"\n使用固定 K={best_k}")
+        # 1. 选股阶段：在训练集上按收益率排序
+        df_stocks = select_topk_stocks(
+            config["train_start"],
+            config["train_end"],
+            instruments=instruments,
+        )
 
-    # 获取TopK股票
-    topk_stocks = df_stocks.head(best_k)["symbol"].tolist()
+        # 2. 选择最优K值
+        if top_k is None:
+            best_k, df_k_results = select_best_k(
+                df_stocks,
+                config["valid_start"],
+                config["valid_end"],
+                max_k=max_k,
+            )
+        else:
+            best_k = top_k
+            df_k_results = None
+            print(f"\n使用固定 K={best_k}")
 
-    # 保存选股和K值选择结果
-    save_dir = os.path.join(os.path.dirname(__file__), "results", f"TopKAllIn_K{best_k}")
-    os.makedirs(save_dir, exist_ok=True)
-    df_stocks.to_csv(os.path.join(save_dir, "stock_selection.csv"), index=False)
-    if df_k_results is not None:
-        df_k_results.to_csv(os.path.join(save_dir, "k_selection.csv"), index=False)
+        # 获取TopK股票
+        topk_stocks = df_stocks.head(best_k)["symbol"].tolist()
+
+        # 保存选股和K值选择结果
+        save_dir = os.path.join(os.path.dirname(__file__), "results", f"TopKAllIn_K{best_k}")
+        os.makedirs(save_dir, exist_ok=True)
+        df_stocks.to_csv(os.path.join(save_dir, "stock_selection.csv"), index=False)
+        if df_k_results is not None:
+            df_k_results.to_csv(os.path.join(save_dir, "k_selection.csv"), index=False)
+
+    # 确定benchmark
+    if benchmark is None:
+        benchmark = config["benchmark"]
+    benchmark = str(benchmark)
 
     # 3. 回测阶段
     portfolio_metric_dict, indicator_dict = run_backtest(
         topk_stocks=topk_stocks,
         test_start=config["test_start"],
         test_end=config["test_end"],
-        benchmark=config["benchmark"],
+        benchmark=benchmark,
         account=config["account"],
     )
 
     # 4. 分析阶段
+    save_dir = os.path.join(os.path.dirname(__file__), "results", f"{'_'.join(topk_stocks)}")
     summary = analyze_results(
         portfolio_metric_dict=portfolio_metric_dict,
         topk_stocks=topk_stocks,
-        k=best_k,
+        k=len(topk_stocks),
         test_start=config["test_start"],
         test_end=config["test_end"],
         save_dir=save_dir,
@@ -405,7 +435,8 @@ def run(max_k=10, top_k=None, instruments="all"):
 
     print(f"\n{'='*60}")
     print("TopK ALL-IN策略执行完成!")
-    print(f"最优K={best_k}, 测试集年化收益={summary['annualized_return']*100:.2f}%")
+    print(f"标的: {topk_stocks}")
+    print(f"测试集年化收益={summary['annualized_return']*100:.2f}%")
     print(f"结果保存在: {save_dir}")
     print(f"{'='*60}")
 
