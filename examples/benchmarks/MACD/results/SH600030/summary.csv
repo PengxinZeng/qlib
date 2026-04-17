@@ -1,0 +1,13 @@
+,0
+target_stock,SH600030
+target_name,SH600030
+strategy,MACD
+test_start,2023-08-08
+test_end,2026-04-15
+total_return,0.5127098910534509
+annualized_return,0.1993871798541198
+bench_annual,0.08240848
+excess_return,0.11697869950791695
+volatility,0.22328354410348022
+sharpe,0.892977494847154
+max_drawdown,0.14242987228832166

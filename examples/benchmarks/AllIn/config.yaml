@@ -1,0 +1,34 @@
+qlib_init:
+    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_data_fix_hfq"
+    region: cn
+
+# 时间配置 (Train用于选股，Valid用于选K，Test用于回测)
+train_period:
+    start_time: 1991-01-29
+    end_time: 2020-10-23
+
+valid_period:
+    start_time: 2020-10-26
+    end_time: 2023-08-07
+
+test_period:
+    start_time: 2023-08-08
+    end_time: 2026-04-15
+
+# 回测配置
+backtest:
+    account: 1000000
+    benchmark: "510300"
+    exchange_kwargs:
+        limit_threshold: 0.10
+        deal_price: close
+        open_cost: 0.0003
+        close_cost: 0.0003
+        min_cost: 5
+
+# 策略配置
+strategy:
+    class: AllInStrategy
+    module_path: strategy
+    kwargs:
+        target_stock: null  # 自动选择或指定

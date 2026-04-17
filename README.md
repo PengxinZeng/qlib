@@ -637,14 +637,3 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 git add .
 git commit -m "add index data collector"
 git push origin main
-
-## TODO：
-### Data
-白酒等行业龙头个股数据
-上证50等指数数据（包括估值）
-基金数据：持有中基金，红利低波，黄金ETF
-
-## Model
-### Handy
-MACD KJD PB/PE
-### RL

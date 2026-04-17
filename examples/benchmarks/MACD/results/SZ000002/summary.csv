@@ -1,0 +1,13 @@
+,0
+target_stock,SZ000002
+target_name,SZ000002
+strategy,MACD
+test_start,2023-08-08
+test_end,2026-04-15
+total_return,0.09251481789015592
+annualized_return,0.035977984735060635
+bench_annual,0.08240848
+excess_return,-0.046430495611142215
+volatility,0.2691644467141728
+sharpe,0.13366544197891728
+max_drawdown,0.2852947620075256

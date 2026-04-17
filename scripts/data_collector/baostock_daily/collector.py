@@ -661,15 +661,3 @@ if __name__ == "__main__":
 conda activate rdagent
 python scripts/data_collector/baostock_daily/collector.py
 """
-
-"""
-数据源	状态	原因
-BaoStock	⚠️	ETF仅返回近3个月数据
-东方财富/AkShare/efinance	❌	push2his.eastmoney.com 连接被断开
-新浪财经	❌无复权	✅ 5138条	仅不复权
-腾讯财经	✅ 后复权	✅ 5136条	推荐
-网易财经	❌	502 错误 已确认
-Tushare	❌	与新pandas不兼容
-天天基金: 已知有分红数据可以下载
-yfinance	❌	未安装
-"""

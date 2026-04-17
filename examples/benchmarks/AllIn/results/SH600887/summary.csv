@@ -1,0 +1,12 @@
+,0
+target_stock,SH600887
+target_name,
+test_start,2023-08-08
+test_end,2026-04-15
+total_return,0.06086458989745394
+annualized_return,0.023669562737898754
+bench_annual,0.08240848
+excess_return,-0.058738917608304096
+volatility,0.18043994378284056
+sharpe,0.13117695695131157
+max_drawdown,0.2203813804272905
