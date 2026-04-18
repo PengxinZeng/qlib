@@ -1,0 +1,36 @@
+qlib_init:
+    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_data_fix_hfq"
+    region: cn
+
+# KDJ 参数
+kdj_params:
+    n_period: 9        # RSV计算周期
+    k_smooth: 3       # K线平滑因子 (2/3, 1/3)
+    d_smooth: 3        # D线平滑因子 (2/3, 1/3)
+    overbuy: 80        # 超买阈值
+    oversell: 20       # 超卖阈值
+
+# 时间配置 (TRAIN用于选股，VAL用于选K，TEST用于回测)
+train_period:
+    start_time: 1991-01-29
+    end_time: 2020-10-23
+
+valid_period:
+    start_time: 2020-10-26
+    end_time: 2023-08-07
+
+test_period:
+    start_time: 2023-08-08
+    end_time: 2026-04-15
+
+# 回测配置
+backtest:
+    account: 1000000
+    benchmark: "510300"
+    exchange_kwargs:
+        limit_threshold: 0.10
+        deal_price: close
+        open_cost: 0.0003
+        close_cost: 0.0003
+        min_cost: 5
+        trade_unit: 0.001  # 允许单股交易（默认100）

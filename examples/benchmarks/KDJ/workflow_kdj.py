@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-MACD TopK Strategy Workflow
-MACD TopK均匀持仓策略工作流
+KDJ TopK Strategy Workflow
+KDJ TopK均匀持仓策略工作流
 
 策略逻辑:
-1. TRAIN Set: 在训练集上用MACD策略回测所有股票，选出TOP K只
+1. TRAIN Set: 在训练集上用KDJ策略回测所有股票，选出TOP K只
 2. VAL Set: 在验证集上选择最优K值
 3. EVAL Set: 在测试集上使用最优K进行评测
 
 Usage:
-    python workflow_macd.py run --max_k=10
+    python workflow_kdj.py run --max_k=10
 """
 
 import os
@@ -35,9 +35,11 @@ def load_config():
     return {
         "provider_uri": yaml_config["qlib_init"]["provider_uri"],
         "region": yaml_config["qlib_init"]["region"],
-        "fast_period": yaml_config["macd_params"]["fast_period"],
-        "slow_period": yaml_config["macd_params"]["slow_period"],
-        "signal_period": yaml_config["macd_params"]["signal_period"],
+        "n_period": yaml_config["kdj_params"]["n_period"],
+        "k_smooth": yaml_config["kdj_params"]["k_smooth"],
+        "d_smooth": yaml_config["kdj_params"]["d_smooth"],
+        "overbuy": yaml_config["kdj_params"]["overbuy"],
+        "oversell": yaml_config["kdj_params"]["oversell"],
         "train_start": yaml_config["train_period"]["start_time"],
         "train_end": yaml_config["train_period"]["end_time"],
         "valid_start": yaml_config.get("valid_period", {}).get("start_time", "2020-10-26"),
@@ -69,19 +71,19 @@ INSTRUMENT_INFO = {
     "159845": "地产ETF", "159850": "银行ETF", "159869": "游戏ETF",
 }
 
-# 宽基指数ETF池
-# etf_pool = '[\"510050\",\"510300\",\"510500\",\"159915\",\"159919\",\"510310\",\"510180\",\"512100\",\"560010\"]'
 
-def compute_macd_returns_batch(close_df, fast_period=12, slow_period=26, signal_period=9,
-                              initial_cash=1000000, buy_cost=0.0003, sell_cost=0.0003):
+def compute_kdj_returns_batch(close_df, n_period=9, overbuy=80, oversell=20,
+                             initial_cash=1000000, buy_cost=0.0003, sell_cost=0.0003):
     """
-    批量向量化计算所有股票的MACD策略收益（优化版）
+    批量向量化计算所有股票的KDJ策略收益
 
     Args:
         close_df: DataFrame, index=datetime, columns=instruments, values=close prices
         initial_cash: 每只股票分配的初始资金
         buy_cost: 买入费率（含佣金，默认0.03%）
         sell_cost: 卖出费率（含佣金+印花税，默认0.08%）
+        overbuy: 超买阈值
+        oversell: 超卖阈值
 
     Returns:
         pd.Series: {symbol: return}
@@ -89,7 +91,7 @@ def compute_macd_returns_batch(close_df, fast_period=12, slow_period=26, signal_
     import time
     t0 = time.time()
 
-    warmup = slow_period + signal_period
+    warmup = n_period
     results = {}
 
     for col in close_df.columns:
@@ -99,35 +101,58 @@ def compute_macd_returns_batch(close_df, fast_period=12, slow_period=26, signal_
             continue
 
         try:
-            # 向量化计算EMA
-            ema_fast = prices.ewm(span=fast_period, adjust=False).mean()
-            ema_slow = prices.ewm(span=slow_period, adjust=False).mean()
-            dif = ema_fast - ema_slow
-            dea = dif.ewm(span=signal_period, adjust=False).mean()
+            # 计算N日高低点
+            low_n = prices.rolling(window=n_period).min()
+            high_n = prices.rolling(window=n_period).max()
 
-            # 向量化金叉死叉
-            prev_dif = dif.shift(1)
-            prev_dea = dea.shift(1)
-            golden_cross = (prev_dif < prev_dea) & (dif > dea)
-            death_cross = (prev_dif > prev_dea) & (dif < dea)
+            # 计算RSV
+            rsv = (prices - low_n) / (high_n - low_n + 1e-12) * 100
 
-            # 向量化模拟交易
+            # 初始化K和D
+            k = np.full(len(prices), 50.0)
+            d = np.full(len(prices), 50.0)
+
+            # 计算KDJ (从warmup开始)
+            for i in range(warmup, len(prices)):
+                k[i] = (2 * k[i-1] + 1 * rsv.iloc[i]) / 3
+                d[i] = (2 * d[i-1] + 1 * k[i]) / 3
+
+            # 转换为pandas
+            k_series = pd.Series(k, index=prices.index)
+            d_series = pd.Series(d, index=prices.index)
+
+            # 计算金叉死叉
+            prev_k = k_series.shift(1)
+            prev_d = d_series.shift(1)
+            golden_cross = (prev_k < prev_d) & (k_series > d_series)
+            death_cross = (prev_k > prev_d) & (k_series < d_series)
+
+            # 模拟交易
             cash = initial_cash
             position = 0
             price_arr = prices.values
             gc_arr = golden_cross.values
             dc_arr = death_cross.values
+            k_arr = k_series.values
 
             for i in range(warmup, len(prices)):
                 price = price_arr[i]
+                ki = k_arr[i]
+
                 if gc_arr[i] and position == 0:
-                    amount = cash * 0.99 / price
-                    if amount > 0:
-                        cash -= amount * price * (1 + buy_cost)
-                        position = amount
+                    # 金叉买入（在超卖区或K值从低位上升）
+                    if ki < oversell or ki < 50:
+                        amount = cash * 0.99 / price
+                        if amount > 0:
+                            cash -= amount * price * (1 + buy_cost)
+                            position = amount
+
                 elif dc_arr[i] and position > 0:
-                    cash += position * price * (1 - sell_cost)
-                    position = 0
+                    # 死叉卖出（在超买区或J值过高）
+                    j = 3 * ki - 2 * k_arr[i-1]
+                    if ki > overbuy or j > 100:
+                        cash += position * price * (1 - sell_cost)
+                        position = 0
 
             final_value = cash + position * price_arr[-1]
             results[col] = (final_value - initial_cash) / initial_cash
@@ -139,18 +164,10 @@ def compute_macd_returns_batch(close_df, fast_period=12, slow_period=26, signal_
 
 
 def select_topk_stocks(config, instruments="all"):
-    """在训练集上用MACD策略选出TopK股票
-
-    Args:
-        config: 配置字典
-        instruments: 股票池，支持:
-            - "all": 所有标的
-            - JSON字符串列表: 如 '["510050","510300"]'
-            - Python列表: 如 ["510050","510300"]
-    """
+    """在训练集上用KDJ策略选出TopK股票"""
     print(f"\n{'='*60}")
     print(f"TRAIN: [{config['train_start']} ~ {config['train_end']}]")
-    print(f"MACD({config['fast_period']},{config['slow_period']},{config['signal_period']})")
+    print(f"KDJ(n={config['n_period']}, overbuy={config['overbuy']}, oversell={config['oversell']})")
     print(f"{'='*60}")
 
     # 解析 instruments 参数
@@ -180,13 +197,13 @@ def select_topk_stocks(config, instruments="all"):
                           freq="day")["$close"].unstack(level=0)
     print(f"数据形状: {close_df.shape}")
 
-    # 批量计算MACD收益
-    print("计算MACD收益...")
-    returns_series = compute_macd_returns_batch(
+    # 批量计算KDJ收益
+    print("计算KDJ收益...")
+    returns_series = compute_kdj_returns_batch(
         close_df,
-        fast_period=config["fast_period"],
-        slow_period=config["slow_period"],
-        signal_period=config["signal_period"],
+        n_period=config["n_period"],
+        overbuy=config["overbuy"],
+        oversell=config["oversell"],
         initial_cash=config["account"],
         buy_cost=config["open_cost"],
         sell_cost=config["close_cost"],
@@ -198,7 +215,7 @@ def select_topk_stocks(config, instruments="all"):
     df_results["name"] = df_results["symbol"].map(lambda x: INSTRUMENT_INFO.get(x, x))
     df_results = df_results.sort_values("total_return", ascending=False)
 
-    print(f"\nTRAIN MACD收益 TOP 20:")
+    print(f"\nTRAIN KDJ收益 TOP 20:")
     print("-" * 70)
     for _, row in df_results.head(20).iterrows():
         print(f"  {row['symbol']:12s} {row['name']:12s} 收益: {row['total_return']*100:8.2f}%")
@@ -207,7 +224,7 @@ def select_topk_stocks(config, instruments="all"):
 
 
 def calculate_portfolio_return(df_stocks, top_k, val_start, val_end, config):
-    """计算TopK组合在验证期间的MACD策略收益"""
+    """计算TopK组合在验证期间的KDJ策略收益"""
     topk_symbols = df_stocks.head(top_k)["symbol"].tolist()
 
     try:
@@ -220,12 +237,11 @@ def calculate_portfolio_return(df_stocks, top_k, val_start, val_end, config):
 
     per_stock_cash = config["account"] / top_k
 
-    # 使用批量函数
-    returns_series = compute_macd_returns_batch(
+    returns_series = compute_kdj_returns_batch(
         close_df,
-        fast_period=config["fast_period"],
-        slow_period=config["slow_period"],
-        signal_period=config["signal_period"],
+        n_period=config["n_period"],
+        overbuy=config["overbuy"],
+        oversell=config["oversell"],
         initial_cash=per_stock_cash,
         buy_cost=config["open_cost"],
         sell_cost=config["close_cost"],
@@ -265,13 +281,8 @@ def select_best_k(df_stocks, config, max_k=10):
 
 
 def run_backtest(topk_stocks, config):
-    """使用MACD TopK策略进行回测
-
-    Args:
-        topk_stocks: 股票代码列表
-        config: 配置字典
-    """
-    from strategy import MACDStrategy
+    """使用KDJ TopK策略进行回测"""
+    from strategy_kdj import KDJStrategy
 
     best_k = len(topk_stocks)
 
@@ -280,12 +291,12 @@ def run_backtest(topk_stocks, config):
     print(f"TopK={best_k}, 标的: {topk_stocks}")
     print(f"{'='*60}")
 
-    strategy = MACDStrategy(
+    strategy = KDJStrategy(
         topk_stocks=topk_stocks,
         top_k=best_k,
-        fast_period=config["fast_period"],
-        slow_period=config["slow_period"],
-        signal_period=config["signal_period"],
+        n_period=config["n_period"],
+        overbuy=config["overbuy"],
+        oversell=config["oversell"],
     )
 
     executor_config = {
@@ -317,8 +328,8 @@ def run_backtest(topk_stocks, config):
     return portfolio_metric_dict, indicator_dict, strategy
 
 
-def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
-    """可视化各持仓股票的MACD和买卖点"""
+def plot_kdj_analysis(topk_stocks, strategy, config, save_dir):
+    """可视化各持仓股票的KDJ和买卖点"""
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
@@ -343,7 +354,7 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
         report_df = None
 
     n_stocks = len(topk_stocks)
-    n_rows = n_stocks + 2  # +1 for holdings stack +1 for returns
+    n_rows = n_stocks + 2
 
     subplot_titles = ["持仓金额分布（堆叠面积图）"]
     for stock in topk_stocks:
@@ -351,45 +362,35 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
         subplot_titles.append(f"{name} ({stock})")
     subplot_titles.append("累计收益率")
 
-    # 启用 secondary_y 用于 MACD 双轴显示
-    specs = [[{}]]  # 第一行：持仓分布
+    specs = [[{}]]
     for _ in range(n_stocks):
-        specs.append([{"secondary_y": True}])  # 股票详情：主Y轴价格，次Y轴MACD
-    specs.append([{}])  # 最后一行：收益
+        specs.append([{"secondary_y": True}])
+    specs.append([{}])
 
     fig = make_subplots(
         rows=n_rows, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.04,
         subplot_titles=subplot_titles,
-        specs=specs
+        specs=specs,
     )
 
-    # Row 1: 持仓金额堆叠面积图（包含现金）
+    # Row 1: 持仓金额堆叠面积图
     position_pivot = df_records.pivot_table(
         index='date', columns='stock', values='position', aggfunc='last'
     ).fillna(0)
     price_pivot = df_records.pivot_table(
         index='date', columns='stock', values='price', aggfunc='last'
     )
-
-    # 计算持仓市值
     position_value = position_pivot * price_pivot
     position_value = position_value.fillna(0)
-
-    # 计算现金 = 总资产 - 总持仓市值
     total_position_value = position_value.sum(axis=1)
 
-    # 获取每日总资产（从回测记录中）
-    # 由于策略记录中没有总资产，我们用初始资金 + 累计收益来估算
-    # 或者从report_df中获取
     if report_df is not None:
-        # 计算总资产
         initial_account = config.get("account", 1000000)
         portfolio_value = initial_account * (1 + report_df["cum_return"])
         cash_value = portfolio_value - total_position_value.reindex(portfolio_value.index, method='ffill')
     else:
-        # 如果没有report_df，假设现金为0
         cash_value = pd.Series(0, index=total_position_value.index)
 
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
@@ -410,7 +411,6 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
                 row=1, col=1
             )
 
-    # 添加现金
     fig.add_trace(
         go.Scatter(
             x=cash_value.index,
@@ -425,7 +425,6 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
         row=1, col=1
     )
 
-    # 总持仓市值（不含现金）
     fig.add_trace(
         go.Scatter(
             x=total_position_value.index,
@@ -446,7 +445,6 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
 
         buy_df = stock_df[stock_df['signal'] == 'BUY']
         sell_df = stock_df[stock_df['signal'] == 'SELL']
-
         row_legend_group = f"stock_{stock}"
         stock_name = INSTRUMENT_INFO.get(stock, stock)
 
@@ -462,7 +460,7 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
             row=idx, col=1, secondary_y=False
         )
 
-        # 买入点（只在第一个子图显示legend）
+        # 买入点
         if len(buy_df) > 0:
             fig.add_trace(
                 go.Scatter(
@@ -490,48 +488,50 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
                 row=idx, col=1, secondary_y=False
             )
 
-        # MACD - DIF（次Y轴）
+        # K线（次Y轴）
         fig.add_trace(
             go.Scatter(
-                x=stock_df.index, y=stock_df['dif'],
-                name="DIF线",
+                x=stock_df.index, y=stock_df['k'],
+                name="K线",
                 line=dict(color="purple", width=1.5),
                 showlegend=True if idx == 2 else False,
-                legendgroup="macd",
+                legendgroup="kdj",
             ),
             row=idx, col=1, secondary_y=True
         )
 
-        # MACD - DEA（次Y轴）
+        # D线（次Y轴）
         fig.add_trace(
             go.Scatter(
-                x=stock_df.index, y=stock_df['dea'],
-                name="DEA线",
+                x=stock_df.index, y=stock_df['d'],
+                name="D线",
                 line=dict(color="orange", width=1.5),
                 showlegend=True if idx == 2 else False,
-                legendgroup="macd",
+                legendgroup="kdj",
             ),
             row=idx, col=1, secondary_y=True
         )
 
-        # MACD柱（次Y轴）
-        macd_colors = ["red" if v >= 0 else "green" for v in stock_df['histogram']]
+        # J线（次Y轴）
         fig.add_trace(
-            go.Bar(
-                x=stock_df.index, y=stock_df['histogram'],
-                name="MACD柱",
-                marker_color=macd_colors,
-                opacity=0.4,
-                width=1000*3600*24,
+            go.Scatter(
+                x=stock_df.index, y=stock_df['j'],
+                name="J线",
+                line=dict(color="gray", width=1, dash="dot"),
                 showlegend=True if idx == 2 else False,
-                legendgroup="macd",
+                legendgroup="kdj",
             ),
             row=idx, col=1, secondary_y=True
         )
 
-        # 设置Y轴标题
+        # 超买超卖线
+        fig.add_hline(y=config["overbuy"], line_dash="dash", line_color="red", line_width=0.5,
+                      row=idx, col=1, annotation_text="超买线", annotation_position="right")
+        fig.add_hline(y=config["oversell"], line_dash="dash", line_color="green", line_width=0.5,
+                      row=idx, col=1, annotation_text="超卖线", annotation_position="right")
+
         fig.update_yaxes(title_text="股价", row=idx, col=1, secondary_y=False)
-        fig.update_yaxes(title_text="MACD", row=idx, col=1, secondary_y=True)
+        fig.update_yaxes(title_text="KDJ", row=idx, col=1, secondary_y=True)
 
     # 最后一行: 累计收益对比
     row_return = n_rows
@@ -549,7 +549,6 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
             row=row_return, col=1
         )
 
-        # 添加基准收益
         if "bench" in report_df.columns:
             report_df["bench_cum"] = (1 + report_df["bench"]).cumprod() - 1
             fig.add_trace(
@@ -567,7 +566,7 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
 
     fig.update_layout(
         height=300 + n_stocks * 280,
-        title_text=f"MACD TopK={n_stocks} 策略分析<br><sub>{config['test_start']} ~ {config['test_end']}</sub>",
+        title_text=f"KDJ TopK={n_stocks} 策略分析<br><sub>{config['test_start']} ~ {config['test_end']}</sub>",
         showlegend=True,
         legend=dict(
             orientation="h",
@@ -582,15 +581,17 @@ def plot_macd_analysis(topk_stocks, strategy, config, save_dir):
         hovermode="x unified",
     )
 
-    # 更新y轴标签
     fig.update_yaxes(title_text="持仓金额(元)", row=1, col=1)
     for i in range(2, n_rows):
-        fig.update_yaxes(title_text="价格/MACD", row=i, col=1)
+        fig.update_yaxes(title_text="价格/KDJ", row=i, col=1)
     fig.update_yaxes(title_text="累计收益(%)", row=row_return, col=1)
 
-    fig.write_html(os.path.join(save_dir, "macd_analysis.html"))
-    fig.write_image(os.path.join(save_dir, "macd_analysis.png"), width=1400, height=fig.layout.height, scale=2)
-    print(f"  可视化已保存: {save_dir}/macd_analysis.html")
+    fig.write_html(os.path.join(save_dir, "kdj_analysis.html"))
+    try:
+        fig.write_image(os.path.join(save_dir, "kdj_analysis.png"), width=1400, height=fig.layout.height, scale=2)
+    except:
+        pass
+    print(f"  可视化已保存: {save_dir}/kdj_analysis.html")
 
 
 def analyze_results(portfolio_metric_dict, topk_stocks, best_k, config, save_dir, strategy=None):
@@ -639,28 +640,17 @@ def analyze_results(portfolio_metric_dict, topk_stocks, best_k, config, save_dir
     except:
         pass
 
-    # 生成MACD可视化
     if strategy is not None:
-        plot_macd_analysis(topk_stocks, strategy, config, save_dir)
+        plot_kdj_analysis(topk_stocks, strategy, config, save_dir)
 
     return summary
 
 
 def run(stocks=None, max_k=10, instruments="all"):
-    """运行MACD TopK策略
-
-    Args:
-        stocks: 直接指定股票列表，如 '["159919","510300"]'
-        max_k: 最大K值（用于K值选择）
-        instruments: 股票池，支持:
-            - "all": 所有标的（默认）
-            - JSON字符串列表: 如 '["510050","510300"]'
-            - Python列表: 如 ["510050","510300"]
-    """
+    """运行KDJ TopK策略"""
     config = load_config()
     qlib.init(provider_uri=config["provider_uri"], region=config["region"])
 
-    # 处理stocks参数
     if stocks is not None:
         import json
         if isinstance(stocks, str):
@@ -683,7 +673,7 @@ def run(stocks=None, max_k=10, instruments="all"):
     portfolio_metric_dict, indicator_dict, strategy = run_backtest(topk_stocks, config)
 
     # 4. 分析结果
-    save_dir = os.path.join(os.path.dirname(__file__), "results", f"MACD_{'_'.join(topk_stocks)}")
+    save_dir = os.path.join(os.path.dirname(__file__), "results", f"KDJ_{'_'.join(topk_stocks)}")
     os.makedirs(save_dir, exist_ok=True)
     if df_stocks is not None:
         df_stocks.to_csv(os.path.join(save_dir, "stock_selection.csv"), index=False)
