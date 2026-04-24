@@ -24,10 +24,13 @@
 - **海外ETF (GLD等)**: yfinance (需要代理+设置 `CURL_CFFI_SSL_BACKEND=openssl`)
 
 ## 数据整理
-- [ ] K线数据+估值
+- [x] K线数据+估值
+- [x] 首日设置为有效市场首日
 - [ ] 对齐首日收盘价为1.0
 - [x] 训练测试集合划分
-- [ ] 设置不可交易日：比如茅台分红前；根据交易量
+- [x] 对齐最终日
+- [x] 训练（AI参数调优），验证（人工参数调优），测试A1（模型选择）， 测试A2（实测），测试B（实测-再验证）集合划分
+- [x] 设置不可交易日：比如茅台分红前；根据交易量
 
 ## 评测
 - [ ] 换手率，操作频率
@@ -37,8 +40,9 @@
 ## Handy
 - [x] ALL-IN + Val set Top-K选股
 - [x] MACD + Val set Top-K选股
+- [ ] MACD-周频月频 + Val set Top-K选股
 - [x] KDJ
-- [ ] PB/PE
+- [x] PB/PE基本面策略：已完成策略设计与参数分析，熊市期年化-8.6%显著优于基准-20.91%
 
 ```
 实现MACD策略：
@@ -58,5 +62,5 @@
 
 # Code Push
 git add .
-git commit -m "KDJ-ETF Data"
+git commit -m "ETF-Index Data & PbPe Strategy"
 git push origin main

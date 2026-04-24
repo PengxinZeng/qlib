@@ -1,0 +1,116 @@
+qlib_init:
+    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index"
+    region: cn
+market: &market all
+benchmark: &benchmark "510300"
+
+# 数据处理器配置
+data_handler_config: &data_handler_config
+    start_time: 2005-02-23
+    end_time: 2026-04-13
+    fit_start_time: 2005-02-23
+    fit_end_time: 2019-11-01
+    instruments: *market
+
+    # 特征字段
+    fields:
+        # 基金行情
+        - open
+        - high
+        - low
+        - close
+        - volume
+        - amount
+
+        # 指数行情
+        - index_open
+        - index_high
+        - index_low
+        - index_close
+        - index_volume
+
+        # 估值指标
+        - pe_ttm
+        - pe_static
+        - pb
+        - pe_ttm_median
+        - pe_static_median
+        - pb_median
+        - pe_ttm_equal_weight
+        - pe_static_equal_weight
+        - pb_equal_weight
+
+    # 标签: 未来2日收益
+    label: ["Ref($close, -2)/Ref($close, -1) - 1"]
+
+# 端口分析配置
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy
+        kwargs:
+            signal: <PRED>
+            topk: 5              # 持有5只基金
+            n_drop: 1             # 每次减持1只
+            n_hold: 10            # 最多持仓10只
+
+    backtest:
+        start_time: 2021-03-29   # test_a1开始
+        end_time: 2026-04-09    # test_b结束
+        account: 1000000        # 100万初始资金
+        benchmark: *benchmark
+        exchange_kwargs:
+            limit_threshold: 0.10
+            deal_price: close
+            open_cost: 0.0003    # 买入0.03%
+            close_cost: 0.0003   # 卖出0.03%
+            min_cost: 5
+
+# 任务配置
+task:
+    model:
+        class: LGBModel
+        module_path: qlib.contrib.model.gbdt
+        kwargs:
+            loss: mse
+            colsample_bytree: 0.9
+            learning_rate: 0.05
+            subsample: 0.8
+            lambda_l1: 100.0
+            lambda_l2: 500.0
+            max_depth: 6
+            num_leaves: 31
+            num_threads: 10
+
+    dataset:
+        class: DatasetH
+        module_path: qlib.data.dataset
+        kwargs:
+            handler:
+                class: AlphaETF
+                module_path: qlib.contrib.data.handler_etf
+                kwargs:
+                    <<: *data_handler_config
+            segments:
+                # 按累计可交易数量划分
+                train: [2005-02-23, 2019-11-01]      # 50% 累计量
+                valid: [2019-11-04, 2021-03-26]       # 10% 累计量
+                test:  [2021-03-29, 2026-04-09]       # 40% 累计量(test_a1 + a2 + b)
+
+    record:
+        - class: SignalRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            model: <MODEL>
+            dataset: <DATASET>
+
+        - class: SigAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            ana_long_short: False
+            ann_scaler: 252
+
+        - class: PortAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            config: *port_analysis_config
