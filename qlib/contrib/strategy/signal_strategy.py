@@ -537,3 +537,51 @@ class ScoreWeightStrategy(WeightStrategyBase):
         weights = score / score.sum() * self.get_risk_degree(trade_start_time)
         final_stock_weight = {stock_id: weights[i][0] for i, stock_id in enumerate(stocks)}
         return {stock: w for stock, w in final_stock_weight.items() if w > 0}
+
+
+class EvenWeightStrategy(WeightStrategyBase):
+    """
+    均匀权重策略：每个score > 0的股票均匀持有
+
+    策略逻辑：
+    - score > 0: 买入/持有
+    - score <= 0: 卖出
+
+    持仓分配：
+    - 所有正score的股票等权重分配
+    - 总权重 = risk_degree
+    """
+
+    def generate_target_weight_position(self, score, current, trade_start_time, trade_end_time):
+        """
+        生成目标持仓权重
+
+        Parameters
+        ----------
+        score : pd.Series
+            信号分数，index为股票代码，值为分数
+            score > 0 -> 买入/持有
+            score <= 0 -> 卖出
+        current : Position
+            当前持仓
+        trade_start_time : pd.Timestamp
+            交易开始时间
+        trade_end_time : pd.Timestamp
+            交易结束时间
+
+        Returns
+        -------
+        dict
+            目标持仓权重，{stock_id: weight}
+        """
+        # 选择所有正score的股票
+        positive_stocks = score[score > 0].index.tolist()
+
+        if len(positive_stocks) == 0:
+            return {}
+
+        # 均匀分配权重
+        weight_per_stock = self.get_risk_degree(trade_start_time) / len(positive_stocks)
+        target_weight_position = {stock: weight_per_stock for stock in positive_stocks}
+
+        return target_weight_position

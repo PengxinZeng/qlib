@@ -29,7 +29,10 @@
 - [ ] 对齐首日收盘价为1.0
 - [x] 训练测试集合划分
 - [x] 对齐最终日
-- [x] 训练（AI参数调优），验证（人工参数调优），测试A1（模型选择）， 测试A2（实测），测试B（实测-再验证）集合划分
+- [x] 训练（AI参数调优），验证（人工参数调优），测试（模型选择）集合划分
+  - train: 2005-02-23 ~ 2017-01-03 
+  - valid: 2017-01-04 ~ 2019-10-08 
+  - test: 2019-10-09 ~ 2026-04-09 
 - [x] 设置不可交易日：比如茅台分红前；根据交易量
 
 ## 评测
@@ -62,5 +65,5 @@
 
 # Code Push
 git add .
-git commit -m "ETF-Index Data & PbPe Strategy"
+git commit -m "PbPe Strategy Updates"
 git push origin main

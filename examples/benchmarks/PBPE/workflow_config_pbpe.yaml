@@ -55,8 +55,8 @@ port_analysis_config: &port_analysis_config
             n_hold: 10            # 最多持仓10只
 
     backtest:
-        start_time: 2021-03-29   # test_a1开始
-        end_time: 2026-04-09    # test_b结束
+        start_time: 2019-10-09   # test开始
+        end_time: 2026-04-09    # test结束
         account: 1000000        # 100万初始资金
         benchmark: *benchmark
         exchange_kwargs:
@@ -93,9 +93,9 @@ task:
                     <<: *data_handler_config
             segments:
                 # 按累计可交易数量划分
-                train: [2005-02-23, 2019-11-01]      # 50% 累计量
-                valid: [2019-11-04, 2021-03-26]       # 10% 累计量
-                test:  [2021-03-29, 2026-04-09]       # 40% 累计量(test_a1 + a2 + b)
+                train: [2005-02-23, 2017-01-03]      # 50% 累计量
+                valid: [2017-01-04, 2019-10-08]       # 10% 累计量
+                test:  [2019-10-09, 2026-04-09]       # 20% 累计量
 
     record:
         - class: SignalRecord
