@@ -181,12 +181,83 @@ class DatasetH(Dataset):
             return self.handler.fetch(slc, **kwargs, **self.fetch_kwargs)
         else:
             return self.handler.fetch(slc, **kwargs)
+    
+    def _prepare_seg_with_lookback(self, slc, segment_name, lookback_days: int, **kwargs):
+        """
+        Prepare segment data with optional lookback period for historical context.
+        
+        When lookback_days > 0, this method extends the data loading to include 
+        historical data before the segment start time. This allows models that need
+        rolling window calculations to have sufficient historical context even for
+        the first days of the segment.
+        
+        Parameters
+        ----------
+        slc : slice or tuple
+            Time slice for the segment
+        segment_name : str or None
+            Name of the segment (e.g., 'train', 'test') or None if not a named segment
+        lookback_days : int
+            Number of trading days to extend before the segment start.
+            The returned DataFrame will include these extra historical days.
+        **kwargs : dict
+            Additional arguments for handler.fetch
+            
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame including lookback_days of historical data before segment start,
+            plus all data within the original segment range.
+        """
+        if lookback_days <= 0:
+            # No lookback needed, use original behavior
+            return self._prepare_seg(slc, **kwargs)
+        
+        # Extract start and end from the slice
+        if isinstance(slc, slice):
+            seg_start, seg_end = slc.start, slc.stop
+        elif isinstance(slc, (tuple, list)) and len(slc) == 2:
+            seg_start, seg_end = slc[0], slc[1]
+        else:
+            # Cannot parse, fallback to original behavior
+            return self._prepare_seg(slc, **kwargs)
+        
+        # Import here to avoid circular dependency
+        from qlib.data import D
+        import pandas as pd
+        
+        seg_start = pd.Timestamp(seg_start)
+        seg_end = pd.Timestamp(seg_end)
+        
+        # Get trading calendar and extend start time
+        try:
+            # Get calendar before seg_start (excluding seg_start itself)
+            extended_calendar = D.calendar(end_time=seg_start, freq="day")
+            if len(extended_calendar) >= lookback_days + 1:
+                # Take the lookback_days before seg_start (extended_calendar[-1] is seg_start)
+                extended_start = extended_calendar[-(lookback_days + 1)]
+            elif len(extended_calendar) > 1:
+                # Use earliest available date if not enough history
+                extended_start = extended_calendar[0]
+            else:
+                # No history available, use original start
+                extended_start = seg_start
+        except Exception:
+            # If calendar fails, fallback to original segment
+            extended_start = seg_start
+        
+        # Fetch extended data (from extended_start to seg_end)
+        extended_slice = (extended_start, seg_end)
+        df = self._prepare_seg(extended_slice, **kwargs)
+        
+        return df
 
     def prepare(
         self,
         segments: Union[List[Text], Tuple[Text], Text, slice, pd.Index],
         col_set=DataHandler.CS_ALL,
         data_key=DataHandlerLP.DK_I,
+        lookback_days: int = 0,
         **kwargs,
     ) -> Union[List[pd.DataFrame], pd.DataFrame]:
         """
@@ -211,6 +282,11 @@ class DatasetH(Dataset):
         data_key : str
             The data to fetch:  DK_*
             Default is DK_I, which indicate fetching data for **inference**.
+        
+        lookback_days : int
+            Number of days to extend before the segment start time to include historical data.
+            This is useful for models that need historical context (e.g., rolling window calculations).
+            Default is 0 (no extension).
 
         kwargs :
             The parameters that kwargs may contain:
@@ -237,14 +313,14 @@ class DatasetH(Dataset):
         # 1) Use it as segment name first
         # 1.1) directly fetch split like "train" "valid" "test"
         if isinstance(segments, str) and segments in self.segments:
-            return self._prepare_seg(self.segments[segments], **seg_kwargs)
+            return self._prepare_seg_with_lookback(self.segments[segments], segments, lookback_days, **seg_kwargs)
 
         # 1.2) fetch multiple splits like ["train", "valid"] ["train", "valid", "test"]
         if isinstance(segments, (list, tuple)) and all(seg in self.segments for seg in segments):
-            return [self._prepare_seg(self.segments[seg], **seg_kwargs) for seg in segments]
+            return [self._prepare_seg_with_lookback(self.segments[seg], seg, lookback_days, **seg_kwargs) for seg in segments]
 
         # 2) Use pass it directly to prepare a single seg
-        return self._prepare_seg(segments, **seg_kwargs)
+        return self._prepare_seg_with_lookback(segments, None, lookback_days, **seg_kwargs)
 
     # helper functions
     @staticmethod

@@ -22,20 +22,24 @@ def _calculate_maximum(df: pd.DataFrame, is_ex: bool = False):
     return start_date, end_date
 
 
-def _calculate_mdd(series):
+def _calculate_mdd(series, mode: str = "sum"):
     """
     Calculate mdd
 
-    :param series:
+    :param series: cumulative return series
+    :param mode: "sum" -> absolute drawdown; "product" -> percentage drawdown from peak NAV
     :return:
     """
+    if mode == "product":
+        # 还原净值曲线（cum_return = NAV - 1），用百分比回撤
+        nav = series + 1
+        return nav / nav.cummax() - 1
     return series - series.cummax()
 
-
-def _calculate_report_data(df: pd.DataFrame) -> pd.DataFrame:
+def _calculate_report_data(df: pd.DataFrame, return_mode: str = "product") -> pd.DataFrame:
     """
-
     :param df:
+    :param return_mode: "product" (复利，适合绝对收益净值) 或 "sum" (累加，向后兼容)
     :return:
     """
     index_names = df.index.names
@@ -43,18 +47,24 @@ def _calculate_report_data(df: pd.DataFrame) -> pd.DataFrame:
 
     report_df = pd.DataFrame()
 
-    report_df["cum_bench"] = df["bench"].cumsum()
-    report_df["cum_return_wo_cost"] = df["return"].cumsum()
-    report_df["cum_return_w_cost"] = (df["return"] - df["cost"]).cumsum()
-    # report_df['cum_return'] - report_df['cum_return'].cummax()
-    report_df["return_wo_mdd"] = _calculate_mdd(report_df["cum_return_wo_cost"])
-    report_df["return_w_cost_mdd"] = _calculate_mdd((df["return"] - df["cost"]).cumsum())
+    if return_mode == "product":
+        # 绝对收益：(1+r).cumprod() - 1，反映真实净值复利增长
+        report_df["cum_bench"] = (1 + df["bench"]).cumprod() - 1
+        report_df["cum_return_wo_cost"] = (1 + df["return"]).cumprod() - 1
+        report_df["cum_return_w_cost"] = (1 + df["return"] - df["cost"]).cumprod() - 1
+    else:
+        # sum 模式（原始行为，向后兼容）
+        report_df["cum_bench"] = df["bench"].cumsum()
+        report_df["cum_return_wo_cost"] = df["return"].cumsum()
+        report_df["cum_return_w_cost"] = (df["return"] - df["cost"]).cumsum()
+    report_df["return_wo_mdd"] = _calculate_mdd(report_df["cum_return_wo_cost"], mode=return_mode)
+    report_df["return_w_cost_mdd"] = _calculate_mdd(report_df["cum_return_w_cost"], mode=return_mode)
 
+    # 超额收益（差值）：始终用 sum，无复利语义
     report_df["cum_ex_return_wo_cost"] = (df["return"] - df["bench"]).cumsum()
     report_df["cum_ex_return_w_cost"] = (df["return"] - df["bench"] - df["cost"]).cumsum()
     report_df["cum_ex_return_wo_cost_mdd"] = _calculate_mdd((df["return"] - df["bench"]).cumsum())
     report_df["cum_ex_return_w_cost_mdd"] = _calculate_mdd((df["return"] - df["cost"] - df["bench"]).cumsum())
-    # return_wo_mdd , return_w_cost_mdd,  cum_ex_return_wo_cost_mdd, cum_ex_return_w
 
     report_df["turnover"] = df["turnover"]
     report_df.sort_index(ascending=True, inplace=True)
@@ -63,15 +73,16 @@ def _calculate_report_data(df: pd.DataFrame) -> pd.DataFrame:
     return report_df
 
 
-def _report_figure(df: pd.DataFrame) -> [list, tuple]:
+def _report_figure(df: pd.DataFrame, return_mode: str = "product") -> [list, tuple]:
     """
 
     :param df:
+    :param return_mode: "product" (复利净值) 或 "sum" (累加，向后兼容)
     :return:
     """
 
     # Get data
-    report_df = _calculate_report_data(df)
+    report_df = _calculate_report_data(df, return_mode=return_mode)
 
     # Maximum Drawdown
     max_start_date, max_end_date = _calculate_maximum(report_df)
@@ -87,8 +98,17 @@ def _report_figure(df: pd.DataFrame) -> [list, tuple]:
     report_df = _temp_df
 
     # Create figure
-    _default_kind_map = dict(kind="ScatterGraph", kwargs={"mode": "lines+markers"})
-    _temp_fill_args = {"fill": "tozeroy", "mode": "lines+markers"}
+    _default_kind_map = dict(kind="ScatterGraph", kwargs={
+        "mode": "lines+markers",
+        "line": {"width": 0.8},
+        "marker": {"size": 2},
+    })
+    _temp_fill_args = {
+        "fill": "tozeroy",
+        "mode": "lines+markers",
+        "line": {"width": 0.8},
+        "marker": {"size": 2},
+    }
     _column_row_col_dict = [
         ("cum_bench", dict(row=1, col=1)),
         ("cum_return_wo_cost", dict(row=1, col=1)),
@@ -163,7 +183,7 @@ def _report_figure(df: pd.DataFrame) -> [list, tuple]:
     return (figure,)
 
 
-def report_graph(report_df: pd.DataFrame, show_notebook: bool = True) -> [list, tuple]:
+def report_graph(report_df: pd.DataFrame, show_notebook: bool = True, return_mode: str = "product") -> [list, tuple]:
     """display backtest report
 
         Example:
@@ -241,7 +261,7 @@ def report_graph(report_df: pd.DataFrame, show_notebook: bool = True) -> [list, 
     :return: if show_notebook is True, display in notebook; else return **plotly.graph_objs.Figure** list.
     """
     report_df = report_df.copy()
-    fig_list = _report_figure(report_df)
+    fig_list = _report_figure(report_df, return_mode=return_mode)
     if show_notebook:
         BaseGraph.show_graph_in_notebook(fig_list)
     else:

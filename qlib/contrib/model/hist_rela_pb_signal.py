@@ -25,8 +25,8 @@ class HistRelaPBSignal(Model):
 
     def __init__(
         self,
-        k: int = 20,
-        n: int = 5,
+        lookback_days: int = 20,
+        min_valid_days_ratio: float = 0.20,
         oversold_threshold: float = 0.10,
         overbought_threshold: float = 0.90,
         volume_threshold: float = 0.0,
@@ -35,10 +35,11 @@ class HistRelaPBSignal(Model):
         """
         Parameters
         ----------
-        k : int
-            历史窗口天数
-        n : int
-            有效数据观察期（至少需要n条有效数据才计算信号）
+        lookback_days : int
+            历史回看窗口天数，用于计算PB百分位
+        min_valid_days_ratio : float
+            最小有效数据天数占 lookback_days 的比例，取值 (0, 1]
+            实际 min_valid_days = max(1, int(lookback_days * min_valid_days_ratio))
         oversold_threshold : float
             超卖阈值，低于此百分位产生买入信号
         overbought_threshold : float
@@ -48,20 +49,22 @@ class HistRelaPBSignal(Model):
         freq : str
             数据频率
         """
-        self.k = k
-        self.n = n
-        self.oversold_threshold = oversold_threshold
-        self.overbought_threshold = overbought_threshold
-        self.volume_threshold = volume_threshold
+        self.lookback_days = int(lookback_days)
+        self.min_valid_days_ratio = float(min_valid_days_ratio)
+        self.min_valid_days = max(1, int(self.lookback_days * self.min_valid_days_ratio))
+        self.oversold_threshold = float(oversold_threshold)
+        self.overbought_threshold = float(overbought_threshold)
+        self.volume_threshold = float(volume_threshold)
         self.freq = freq
 
     def fit(self, dataset: DatasetH, reweighter=None):
         """非深度学习模型，fit直接返回"""
+        print("HistRelaPBSignal fit")
         pass
 
-    def predict(self, dataset: DatasetH, segment: Union[str, slice] = "test") -> pd.Series:
+    def predict(self, dataset: DatasetH, segment: Union[str, slice] = "test") -> pd.DataFrame:
         """
-        生成信号Series
+        生成信号DataFrame，包含signal和debug信息
 
         Parameters
         ----------
@@ -72,67 +75,80 @@ class HistRelaPBSignal(Model):
 
         Returns
         -------
-        pd.Series
-            索引为(instrument, datetime)的信号Series
+        pd.DataFrame
+            列：score, percentile, current_pb, close
+            索引为(datetime, instrument)
         """
-        # 获取数据的时间和范围
-        df = dataset.prepare(segment, col_set="feature", data_key=DataHandlerLP.DK_I)
+        # 获取原始segment的时间范围（不包含lookback）
+        if isinstance(segment, str) and segment in dataset.segments:
+            seg_start, seg_end = dataset.segments[segment]
+        elif isinstance(segment, slice):
+            seg_start, seg_end = segment.start, segment.stop
+        elif isinstance(segment, (tuple, list)) and len(segment) == 2:
+            seg_start, seg_end = segment[0], segment[1]
+        else:
+            seg_start, seg_end = None, None
+        
+        # 加载数据（包含lookback_days的历史数据）
+        df = dataset.prepare(segment, col_set="feature", data_key=DataHandlerLP.DK_I, lookback_days=self.lookback_days)
+        if df.empty:
+            return pd.DataFrame(columns=["score", "percentile", "current_pb", "close"])
 
-        dates = df.index.get_level_values("datetime").unique().tolist()
-        all_signals = []
+        # 提取必要列
+        df = df[["pb", "close", "volume"]].copy()
+        
+        # 注意：经过Handler处理后，不需要额外过滤
+        # 直接使用pb数据计算百分位
 
-        # 提前获取所有instrument
-        instruments = df.index.get_level_values("instrument").unique().tolist()
+        # 按股票分组计算百分位 - 使用高效的向量化方法
+        def calc_percentile_fast(group):
+            pb_arr = group["pb"].values
+            close_arr = group["close"].values
+            volume_arr = group["volume"].values
+            n_rows = len(pb_arr)
+            percentiles = np.full(n_rows, np.nan)
 
-        for date_idx, date in enumerate(dates):
-            day_data = df.xs(date, level="datetime")
+            # 判断每个交易日 ETF 是否可交易：close > 0 且 volume > volume_threshold
+            # 仅用于决定是否输出 score，不影响 percentile 计算
+            tradable = (
+                (~np.isnan(close_arr)) & (close_arr > 0) &
+                (~np.isnan(volume_arr)) & (volume_arr > self.volume_threshold)
+            )
 
-            for inst in day_data.index:
-                row = day_data.loc[inst]
+            for i in range(n_rows):
+                start_idx = max(0, i - self.lookback_days + 1)
+                window_pb = pb_arr[start_idx:i+1]
 
-                # 获取该instrument从开始到当前日期的数据
-                try:
-                    inst_data = df.loc[inst]
-                except KeyError:
-                    # 该instrument在当前日期没有数据
-                    signal = 0
-                    all_signals.append({"instrument": inst, "datetime": date, "signal": signal})
-                    continue
+                # percentile 只过滤 pb NaN，不限制是否可交易
+                valid_window = window_pb[~np.isnan(window_pb)]
 
-                # 只取历史数据（到当前日期为止）
-                inst_data = inst_data.iloc[: date_idx + 1]
-                if len(inst_data) < self.k:
-                    signal = 0
-                else:
-                    hist_data = inst_data.iloc[-self.k:]
+                if len(valid_window) >= self.min_valid_days:
+                    current = valid_window[-1]
+                    hist = valid_window[:-1]
+                    if len(hist) > 0:
+                        percentiles[i] = np.sum(hist < current) / len(hist)
 
-                    valid_pb = []
-                    for _, hist_row in hist_data.iterrows():
-                        if pd.isna(hist_row.get("close")) or pd.isna(hist_row.get("pb")):
-                            continue
-                        if hist_row.get("volume", 0) <= self.volume_threshold:
-                            continue
-                        valid_pb.append(hist_row["pb"])
+            return pd.DataFrame({
+                "current_pb": group["pb"].values,
+                "close": group["close"].values,
+                "percentile": percentiles,
+                "tradable": tradable,
+            }, index=group.index)
 
-                    if len(valid_pb) < self.n:
-                        signal = 0
-                    else:
-                        current_pb = row["pb"]
-                        if pd.isna(current_pb):
-                            signal = 0
-                        else:
-                            percentile = np.sum(np.array(valid_pb) < current_pb) / len(valid_pb)
+        result = df.groupby(level="instrument", group_keys=False).apply(calc_percentile_fast)
 
-                            if percentile < self.oversold_threshold:
-                                signal = 1
-                            elif percentile > self.overbought_threshold:
-                                signal = -1
-                            else:
-                                signal = 0
+        # 生成信号：不可交易日强制 score=0（无论 percentile 如何）
+        result["score"] = 0
+        tradable_mask = result["tradable"]
+        result.loc[tradable_mask & (result["percentile"] < self.oversold_threshold), "score"] = 1
+        result.loc[tradable_mask & (result["percentile"] > self.overbought_threshold), "score"] = -1
 
-                all_signals.append({"instrument": inst, "datetime": date, "signal": signal})
-
-        signal_df = pd.DataFrame(all_signals)
-        if not signal_df.empty:
-            signal_df = signal_df.set_index(["instrument", "datetime"])["signal"]
-        return signal_df
+        # 过滤结果，只返回原始segment范围内的数据（去除lookback的历史数据）
+        if seg_start is not None and seg_end is not None:
+            seg_start = pd.Timestamp(seg_start)
+            seg_end = pd.Timestamp(seg_end)
+            result_dates = result.index.get_level_values("datetime")
+            mask = (result_dates >= seg_start) & (result_dates <= seg_end)
+            result = result[mask]
+        
+        return result[["score", "percentile", "current_pb", "close"]]

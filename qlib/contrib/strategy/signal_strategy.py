@@ -541,27 +541,48 @@ class ScoreWeightStrategy(WeightStrategyBase):
 
 class EvenWeightStrategy(WeightStrategyBase):
     """
-    均匀权重策略：每个score > 0的股票均匀持有
+    均匀权重策略（滚动再平衡 + 仓位上限）：配合三值信号（1/0/-1）的持仓管理
 
     策略逻辑：
-    - score > 0: 买入/持有
-    - score <= 0: 卖出
+    - score = 1: 买入信号（超卖区）
+    - score = 0: 持有信号（中性区）
+    - score = -1: 卖出信号（超买区），平仓
 
-    持仓分配：
-    - 所有正score的股票等权重分配
+    持仓分配（滚动再平衡）：
+    - 买入(1)和持有(0)信号合并为"目标持仓池"
+    - 所有池内股票等权重分配，受单股仓位上限约束
+    - 卖出(-1)信号的股票平仓
     - 总权重 = risk_degree
+
+    优势：
+    - 新机会出现时自动释放部分仓位给新标的
+    - 多个优质股票可以同时持有
+    - 单股仓位上限保证分散化
     """
+
+    def __init__(self, max_stock_weight=0.25, **kwargs):
+        """
+        Parameters
+        ----------
+        max_stock_weight : float
+            单只股票的最大持仓比例，默认0.333（33.3%）
+            用于限制单一标的风险敞口
+        """
+        super().__init__(**kwargs)
+        self.max_stock_weight = max_stock_weight
+        self.debug_info = {}
 
     def generate_target_weight_position(self, score, current, trade_start_time, trade_end_time):
         """
-        生成目标持仓权重
+        生成目标持仓权重（滚动再平衡策略）
 
         Parameters
         ----------
         score : pd.Series
             信号分数，index为股票代码，值为分数
-            score > 0 -> 买入/持有
-            score <= 0 -> 卖出
+            score = 1 -> 买入（超卖）
+            score = 0 -> 持有（中性）
+            score = -1 -> 卖出（超买）
         current : Position
             当前持仓
         trade_start_time : pd.Timestamp
@@ -574,14 +595,81 @@ class EvenWeightStrategy(WeightStrategyBase):
         dict
             目标持仓权重，{stock_id: weight}
         """
-        # 选择所有正score的股票
-        positive_stocks = score[score > 0].index.tolist()
-
-        if len(positive_stocks) == 0:
+        # 1. 构建目标持仓池：买入(1) + 当前持有且信号为持有(0)的股票
+        # 如果score是DataFrame，提取score列；如果是Series，直接使用
+        if isinstance(score, pd.DataFrame):
+            if 'score' in score.columns:
+                signal_score = score['score']
+            else:
+                # 如果没有score列，假设第一列是信号
+                signal_score = score.iloc[:, 0]
+        else:
+            signal_score = score
+        
+        buy_stocks = signal_score[signal_score == 1].index.tolist()
+        hold_stocks = signal_score[signal_score == 0].index.tolist()
+        
+        # 持有信号中，只保留当前实际持有的股票
+        hold_stocks_in_position = [s for s in hold_stocks if current.check_stock(s)]
+        
+        target_pool = buy_stocks + hold_stocks_in_position
+        
+        # 2. 卖出信号(-1)的股票不进入持仓池，自动平仓
+        
+        if len(target_pool) == 0:
             return {}
+        
+        # 3. 计算目标权重：等权
+        weight_eq = min(1.0 / len(target_pool), self.max_stock_weight)
+        target_weight_position = {stock: weight_eq for stock in target_pool}
 
-        # 均匀分配权重
-        weight_per_stock = self.get_risk_degree(trade_start_time) / len(positive_stocks)
-        target_weight_position = {stock: weight_per_stock for stock in positive_stocks}
-
+        if self.debug_info is not None:
+            self.debug_info["current"] = current.position
+            self.debug_info["buy_stocks"] = buy_stocks
+            self.debug_info["target_weight_position"] = target_weight_position
         return target_weight_position
+
+    def generate_trade_decision(self, execute_result=None):
+        trade_step = self.trade_calendar.get_trade_step()
+        trade_start_time, trade_end_time = self.trade_calendar.get_step_time(trade_step)
+        pred_start_time, pred_end_time = self.trade_calendar.get_step_time(trade_step, shift=1)
+        pred_score = self.signal.get_signal(start_time=pred_start_time, end_time=pred_end_time)
+        if pred_score is None:
+            return TradeDecisionWO([], self)
+        current_temp = copy.deepcopy(self.trade_position)
+        assert isinstance(current_temp, Position)
+
+        target_weight_position = self.generate_target_weight_position(
+            score=pred_score, current=current_temp,
+            trade_start_time=trade_start_time, trade_end_time=trade_end_time,
+        )
+
+        # 对 hold 股设精确权重，使 target_amount == current_amount，避免不必要交易
+        # 推导：target_amount = risk_total * weight / pred_close = current_amount
+        #      => weight = current_amount * pred_close / risk_total
+        risk_degree = self.get_risk_degree(trade_step)
+        risk_total_value = risk_degree * current_temp.calculate_value()
+        if risk_total_value > 0:
+            current_stock_set = set(current_temp.get_stock_list())
+            target_pool_set = set(target_weight_position.keys())
+            # 仅当持仓集合与 target_pool 完全一致（无新增、无退出）时才 pin 权重
+            # 有任何变化时走正常等权逻辑，让调仓正常发生
+            if current_stock_set == target_pool_set:
+                for stock in target_weight_position:
+                    pred_price = current_temp.get_stock_price(stock)
+                    if pred_price > 0:
+                        target_weight_position[stock] = (
+                            current_temp.get_stock_amount(stock) * pred_price / risk_total_value
+                        )
+
+        order_list = self.order_generator.generate_order_list_from_target_weight_position(
+            current=current_temp,
+            trade_exchange=self.trade_exchange,
+            risk_degree=risk_degree,
+            target_weight_position=target_weight_position,
+            pred_start_time=pred_start_time,
+            pred_end_time=pred_end_time,
+            trade_start_time=trade_start_time,
+            trade_end_time=trade_end_time,
+        )
+        return TradeDecisionWO(order_list, self)

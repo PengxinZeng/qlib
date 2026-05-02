@@ -8,6 +8,10 @@ import numpy as np
 from tqdm import trange
 from pprint import pprint
 from typing import Union, List, Optional, Dict
+import os
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib import rcParams
 
 from qlib.utils.exceptions import LoadObjectError
 from ..contrib.evaluate import risk_analysis, indicator_analysis
@@ -505,6 +509,12 @@ class PortAnaRecord(ACRecordTemp):
                 analysis["excess_return_with_cost"] = risk_analysis(
                     report_normal["return"] - report_normal["bench"] - report_normal["cost"], freq=_analysis_freq
                 )
+                analysis["return_with_cost"] = risk_analysis(
+                    report_normal["return"] - report_normal["cost"], freq=_analysis_freq, mode="product"
+                )
+                analysis["return_without_cost"] = risk_analysis(
+                    report_normal["return"], freq=_analysis_freq, mode="product"
+                )
 
                 analysis_df = pd.concat(analysis)  # type: pd.DataFrame
                 # log metrics
@@ -517,11 +527,15 @@ class PortAnaRecord(ACRecordTemp):
                 )
                 # print out results
                 pprint(f"The following are analysis results of benchmark return({_analysis_freq}).")
-                pprint(risk_analysis(report_normal["bench"], freq=_analysis_freq))
+                pprint(risk_analysis(report_normal["bench"], freq=_analysis_freq, mode="product"))
                 pprint(f"The following are analysis results of the excess return without cost({_analysis_freq}).")
                 pprint(analysis["excess_return_without_cost"])
                 pprint(f"The following are analysis results of the excess return with cost({_analysis_freq}).")
                 pprint(analysis["excess_return_with_cost"])
+                pprint(f"The following are analysis results of the return without cost({_analysis_freq}).")
+                pprint(analysis["return_without_cost"])
+                pprint(f"The following are analysis results of the return with cost({_analysis_freq}).")
+                pprint(analysis["return_with_cost"])
 
         for _analysis_freq in self.indicator_analysis_freq:
             if _analysis_freq not in indicator_dict:
@@ -686,3 +700,289 @@ class MultiPassPortAnaRecord(PortAnaRecord):
             else:
                 warnings.warn(f"risk_analysis freq {_analysis_freq} is not found")
         return list_path
+
+
+class ReportRecord(RecordTemp):
+    """
+    This is the Report Record class that generates analysis figures and CSVs.
+    It covers the functionalities of draw_analysis_figures:
+    - Save CSVs (pred, report, analysis)
+    - report_graph: return curve
+    - risk_analysis_graph: risk analysis
+    - score_ic_graph: IC analysis
+    - model_performance_graph: model performance
+
+    This class inherits the ``RecordTemp`` class.
+    """
+
+    artifact_path = "report"
+
+    def __init__(
+        self,
+        recorder,
+        dataset=None,
+        freq="1day",
+        **kwargs,
+    ):
+        super().__init__(recorder=recorder)
+        self.dataset = dataset
+        self.freq = freq
+
+    def generate(self, **kwargs):
+        self._generate(**kwargs)
+
+    def _generate(self, **kwargs):
+        import os
+        from qlib.contrib.report import analysis_model, analysis_position
+
+        pred_df = self.recorder.load_object("pred.pkl")
+        report_normal_df = self.recorder.load_object(f"portfolio_analysis/report_normal_{self.freq}.pkl")
+        positions = self.recorder.load_object(f"portfolio_analysis/positions_normal_{self.freq}.pkl")
+        analysis_df = self.recorder.load_object(f"portfolio_analysis/port_analysis_{self.freq}.pkl")
+
+        artifact_objects = {}
+
+        # Save CSVs
+        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        save_root = os.path.join(artifact_uri, "analysis_csvs")
+        os.makedirs(save_root, exist_ok=True)
+
+        csv_dict = {
+            "pred_df": pred_df,
+            "report_normal_df": report_normal_df,
+            "analysis_df": analysis_df,
+        }
+        for csv_type, csv_data in csv_dict.items():
+            save_path = os.path.join(save_root, f"{csv_type}.csv")
+            csv_data.to_csv(save_path, index=True)
+            logger.info(f"Save {csv_type} to local file: {save_path}")
+
+        # 每日持仓明细 CSV: 每行为一天，每列为一只股票/cash 的当日持仓总价值，最后一列 account_value
+        positions_rows = {}
+        for date, pos_obj in positions.items():
+            pos_dict = pos_obj.position
+            account_value = pos_dict.get("now_account_value", float("nan"))
+            cash = pos_dict.get("cash", float("nan"))
+            row = {}
+            for instrument, info in pos_dict.items():
+                if instrument in ("cash_delay", "now_account_value"):
+                    continue
+                if instrument == "cash":
+                    row["cash"] = cash
+                elif isinstance(info, dict):
+                    amount = info.get("amount", float("nan"))
+                    price = info.get("price", float("nan"))
+                    row[instrument] = amount * price
+            row["account_value"] = account_value
+            positions_rows[date] = row
+        if positions_rows:
+            positions_df = pd.DataFrame.from_dict(positions_rows, orient="index")
+            positions_df.index.name = "date"
+            # 把 cash 和 account_value 移到最后两列，其余按列名排序
+            fixed_cols = [c for c in ("cash", "account_value") if c in positions_df.columns]
+            stock_cols = sorted(c for c in positions_df.columns if c not in fixed_cols)
+            positions_df = positions_df[stock_cols + fixed_cols]
+            positions_csv_path = os.path.join(save_root, "positions_daily.csv")
+            positions_df.to_csv(positions_csv_path)
+            logger.info(f"Save positions_daily to local file: {positions_csv_path}")
+
+        # analysis position
+        # report
+        fig_list_return = analysis_position.report_graph(report_normal_df, show_notebook=False)
+
+        # risk analysis
+        fig_list_risk = analysis_position.risk_analysis_graph(analysis_df, report_normal_df, show_notebook=False)
+
+        # analysis model
+        label_df = None
+        if self.dataset is not None:
+            try:
+                label_df = self.dataset.prepare("test", col_set="label")
+                label_df.columns = ["label"]
+            except Exception as e:
+                logger.warning(f"Failed to prepare label data: {e}")
+
+        fig_list_score_ic = []
+        fig_list_model_performance = []
+        if label_df is not None:
+            pred_label = pd.concat([label_df, pred_df], axis=1, sort=True).reindex(label_df.index)
+
+            # score IC
+            fig_list_score_ic = analysis_position.score_ic_graph(pred_label, show_notebook=False)
+
+            # model performance
+            try:
+                fig_list_model_performance = analysis_model.model_performance_graph(pred_label, show_notebook=False)
+            except Exception as e:
+                logger.warning(f"Model performance figure generation failed: {e}")
+                fig_list_model_performance = []
+
+        fig_dict = {
+            "return": fig_list_return,
+            "risk": fig_list_risk,
+            "score_ic": fig_list_score_ic,
+            "model_performance": fig_list_model_performance,
+        }
+        save_root = os.path.join(artifact_uri, "analysis_figures")
+        os.makedirs(save_root, exist_ok=True)
+        for fig_type, _fig_list in fig_dict.items():
+            for idx, _fig in enumerate(_fig_list):
+                save_path = os.path.join(save_root, f"{fig_type}_{idx}.png")
+                _fig.write_image(save_path)
+                logger.info(f"Save figure to local file: {save_path}")
+
+        return artifact_objects
+
+    def list(self):
+        return []
+
+
+class SignalDetailRecord(ACRecordTemp):
+    """
+    信号详细分析Record类，按股票保存每日信号详情到CSV文件
+    
+    为每只股票生成一个CSV文件，包含每天的pb、close、score、percentile等信息
+    """
+
+    artifact_path = "signal_detail"
+    depend_cls = SignalRecord
+
+    def __init__(self, recorder, skip_existing=False):
+        super().__init__(recorder=recorder, skip_existing=skip_existing)
+
+    def _generate(self, **kwargs):        
+        # 设置中文字体支持
+        rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
+        rcParams['axes.unicode_minus'] = False
+        
+        pred_df = self.load("pred.pkl")
+        if pred_df.empty:
+            logger.warning("Empty prediction data.")
+            return {}
+
+        # 获取artifact保存路径
+        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        save_root = os.path.join(artifact_uri, self.artifact_path)
+        os.makedirs(save_root, exist_ok=True)
+        
+        # 创建图片保存目录
+        plot_root = os.path.join(save_root, "plots")
+        os.makedirs(plot_root, exist_ok=True)
+
+        # 按股票分组保存
+        instruments = pred_df.index.get_level_values("instrument").unique()
+        
+        for inst in instruments:
+            inst_data = pred_df.xs(inst, level="instrument")
+            # 清理股票代码中的特殊字符，避免文件名问题
+            safe_inst_name = str(inst).replace("/", "_").replace("\\", "_")
+            
+            # 保存CSV
+            save_path = os.path.join(save_root, f"{safe_inst_name}.csv")
+            inst_data.to_csv(save_path, index=True)
+            
+            # 生成可视化图片
+            self._plot_instrument_signals(inst_data, inst, safe_inst_name, plot_root)
+        
+        logger.info(f"Saved {len(instruments)} instrument signal details to {save_root}")
+        logger.info(f"Saved {len(instruments)} instrument plots to {plot_root}")
+        
+        # 同时保存一个汇总的CSV
+        summary_path = os.path.join(save_root, "_all_signals.csv")
+        pred_df.to_csv(summary_path, index=True)
+        logger.info(f"Saved summary signal details to {summary_path}")
+        
+        return {}
+    
+    def _plot_instrument_signals(self, inst_data, inst, safe_inst_name, plot_root):
+        """
+        为单只股票生成可视化图片，展示各变量随时间的变化
+        
+        Parameters
+        ----------
+        inst_data : pd.DataFrame
+            单只股票的数据，索引为datetime
+        inst : str
+            股票代码
+        safe_inst_name : str
+            清理后的股票代码（用于文件名）
+        plot_root : str
+            图片保存根目录
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        
+        # 获取所有可用的列
+        available_cols = inst_data.columns.tolist()
+        
+        # 定义要绘制的变量及其配置
+        plot_configs = []
+        if 'score' in available_cols:
+            plot_configs.append(('score', '信号得分', 'tab:blue', '-'))
+        if 'percentile' in available_cols:
+            plot_configs.append(('percentile', 'PB百分位', 'tab:orange', '-'))
+        if 'current_pb' in available_cols:
+            plot_configs.append(('current_pb', '当前PB', 'tab:green', '-'))
+        if 'close' in available_cols:
+            plot_configs.append(('close', '收盘价', 'tab:red', '-'))
+        
+        if len(plot_configs) == 0:
+            logger.warning(f"No plottable columns found for {inst}")
+            return
+        
+        # 创建图形，使用多个y轴共享x轴
+        fig, host_ax = plt.subplots(figsize=(14, 8))
+        fig.subplots_adjust(right=0.75)
+        
+        # 第一个变量使用主轴
+        col_name, label, color, linestyle = plot_configs[0]
+        host_ax.set_xlabel('日期', fontsize=12)
+        host_ax.set_ylabel(label, color=color, fontsize=12)
+        line1 = host_ax.plot(inst_data.index, inst_data[col_name], 
+                             color=color, linestyle=linestyle, linewidth=1.5, label=label)
+        host_ax.tick_params(axis='y', labelcolor=color)
+        host_ax.grid(True, alpha=0.3)
+        
+        # 为其他变量创建额外的y轴
+        axes = [host_ax]
+        lines = line1
+        
+        for i, (col_name, label, color, linestyle) in enumerate(plot_configs[1:], start=1):
+            # 创建新的y轴
+            par_ax = host_ax.twinx()
+            
+            # 调整y轴位置，避免重叠
+            if i > 1:
+                par_ax.spines['right'].set_position(('outward', 60 * (i - 1)))
+            
+            par_ax.set_ylabel(label, color=color, fontsize=12)
+            line = par_ax.plot(inst_data.index, inst_data[col_name], 
+                              color=color, linestyle=linestyle, linewidth=1.5, label=label)
+            par_ax.tick_params(axis='y', labelcolor=color)
+            
+            axes.append(par_ax)
+            lines += line
+        
+        # 设置标题
+        plt.title(f'{inst} - 信号指标时序变化', fontsize=14, pad=20)
+        
+        # 格式化x轴日期
+        host_ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        host_ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        plt.setp(host_ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        
+        # 添加图例
+        labels = [l.get_label() for l in lines]
+        host_ax.legend(lines, labels, loc='upper left', fontsize=10)
+        
+        # 保存图片
+        plot_path = os.path.join(plot_root, f"{safe_inst_name}.png")
+        plt.tight_layout()
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        
+        logger.debug(f"Saved plot for {inst} to {plot_path}")
+
+    def list(self):
+        return []
+

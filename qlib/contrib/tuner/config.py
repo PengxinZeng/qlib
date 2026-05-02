@@ -53,37 +53,14 @@ class PipelineExperimentConfig:
         # Save the tuner experiment for further view
         tuner_ex_config_path = os.path.join(self.tuner_ex_dir, "tuner_config.yaml")
         with open(tuner_ex_config_path, "w") as fp:
+            yaml = YAML()
             yaml.dump(TUNER_CONFIG_MANAGER.config, fp)
 
 
 class OptimizationConfig:
     def __init__(self, config, TUNER_CONFIG_MANAGER):
         self.report_type = config.get("report_type", "pred_long")
-        if self.report_type not in [
-            "pred_long",
-            "pred_long_short",
-            "pred_short",
-            "excess_return_without_cost",
-            "excess_return_with_cost",
-            "model",
-        ]:
-            raise ValueError(
-                "report_type should be one of pred_long, pred_long_short, pred_short, excess_return_without_cost, excess_return_with_cost and model"
-            )
-
         self.report_factor = config.get("report_factor", "information_ratio")
-        if self.report_factor not in [
-            "annualized_return",
-            "information_ratio",
-            "max_drawdown",
-            "mean",
-            "std",
-            "model_score",
-            "model_pearsonr",
-        ]:
-            raise ValueError(
-                "report_factor should be one of annualized_return, information_ratio, max_drawdown, mean, std, model_pearsonr and model_score"
-            )
 
         self.optim_type = config.get("optim_type", "max")
         if self.optim_type not in ["min", "max", "correlation"]:

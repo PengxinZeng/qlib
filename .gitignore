@@ -38,6 +38,7 @@ test-output.xml
 
 # special software
 mlruns/
+tuner_results/
 
 tags
 
@@ -52,6 +53,7 @@ tags
 
 # comate
 .comate/
+.claude
 
 # vscode workspace
 qlib.code-workspace

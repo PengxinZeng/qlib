@@ -2,17 +2,14 @@ qlib_init:
     provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend"
     region: cn
 
+# MLflow配置 - 指定实验结果保存位置
+mlflow_tracking_uri: "file:./mlruns"
+
+# 实验名称
+experiment_name: hist_rela_pb_etf
+
 market: &market all
 benchmark: &benchmark "510300_NORMED"
-
-# 数据划分
-data_handler_config: &data_handler_config
-    start_time: 2005-02-23
-    end_time: 2026-04-13
-    fit_start_time: 2005-02-23
-    fit_end_time: 2017-01-03
-    instruments: *market
-    label: ["Ref($close, -2)/Ref($close, -1) - 1"]
 
 # 回测配置
 port_analysis_config: &port_analysis_config
@@ -22,9 +19,10 @@ port_analysis_config: &port_analysis_config
         kwargs:
             signal: <PRED>
             risk_degree: 0.95
+            max_stock_weight: 1.0
     backtest:
-        start_time: "2019-10-09"
-        end_time: "2026-04-13"
+        start_time: "2005-02-23"
+        end_time: "2019-10-08"
         account: 1000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -41,11 +39,11 @@ task:
         class: HistRelaPBSignal
         module_path: qlib.contrib.model.hist_rela_pb_signal
         kwargs:
-            k: 20
-            n: 5
-            oversold_threshold: 0.10
-            overbought_threshold: 0.90
-            volume_threshold: 0.0
+            lookback_days: 1033      # 历史回看窗口天数（使用全部历史数据）
+            min_valid_days_ratio: 0.8    # 最小有效数据天数 = int(lookback_days * ratio)
+            oversold_threshold: 0.09    # 超卖阈值（买入信号）
+            overbought_threshold: 0.63  # 超买阈值（卖出信号）
+            volume_threshold: 0.0       # 成交量阈值
             freq: "day"
 
     dataset:
@@ -53,13 +51,45 @@ task:
         module_path: qlib.data.dataset
         kwargs:
             handler:
-                class: AlphaETF
-                module_path: qlib.contrib.data.handler_etf
-                kwargs: *data_handler_config
+                class: RawFieldsHandler
+                module_path: qlib.contrib.data.handler_raw_fields
+                kwargs:
+                    start_time: 2005-02-23
+                    end_time: 2026-04-13
+                    fit_start_time: 2005-02-23
+                    fit_end_time: 2017-01-03
+                    instruments: *market
+                    fields: 
+                        - "$open"
+                        - "$high"
+                        - "$low"
+                        - "$close"
+                        - "$volume"
+                        - "$pb"
+                        - "$pb_median"
+                        - "$pe_ttm"
+                        - "$pe_ttm_median"
+                    field_names:
+                        - "open"
+                        - "high"
+                        - "low"
+                        - "close"
+                        - "volume"
+                        - "pb"
+                        - "pb_median"
+                        - "pe_ttm"
+                        - "pe_ttm_median"
+                    # 只使用ProcessInf处理无穷值
+                    infer_processors:
+                        - class: ProcessInf
+                          kwargs: {}
+                    learn_processors:
+                        - class: ProcessInf
+                          kwargs: {}
             segments:
                 train: [2005-02-23, 2017-01-03]
                 valid: [2017-01-04, 2019-10-08]
-                test: [2019-10-09, 2026-04-13]
+                test: [2005-02-23, 2019-10-08]  # 临时调整为train+valid用于参数调优
 
     record:
         - class: SignalRecord
@@ -68,7 +98,18 @@ task:
             model: <MODEL>
             dataset: <DATASET>
 
+        - class: SignalDetailRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            skip_existing: False
+
         - class: PortAnaRecord
           module_path: qlib.workflow.record_temp
           kwargs:
             config: *port_analysis_config
+
+        - class: ReportRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            dataset: <DATASET>
+            freq: "1day"

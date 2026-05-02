@@ -18,7 +18,7 @@ class Pipeline:
     GLOBAL_BEST_PARAMS_NAME = "global_best_params.json"
 
     def __init__(self, tuner_config_manager):
-        self.logger = get_module_logger("Pipeline", sh_level=logging.INFO)
+        self.logger = get_module_logger("Pipeline", level=logging.INFO)
 
         self.tuner_config_manager = tuner_config_manager
 

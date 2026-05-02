@@ -596,6 +596,9 @@ class Exchange:
         """
         if current_amount == target_amount:
             return 0
+        # guard against floating-point noise (e.g. a * b / c * c / b ≠ a exactly)
+        if abs(target_amount - current_amount) <= 1e-7 * max(abs(current_amount), abs(target_amount), 1.0):
+            return 0
         elif current_amount < target_amount:
             deal_amount = target_amount - current_amount
             deal_amount = self.round_amount_by_trade_unit(deal_amount, factor)

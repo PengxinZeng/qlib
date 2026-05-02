@@ -163,6 +163,8 @@ def workflow(config_path, experiment_name="workflow", uri_folder="mlruns"):
 
     if "experiment_name" in config:
         experiment_name = config["experiment_name"]
+    else:
+        raise ValueError("`experiment_name` not found in config, please specify it in the config file or command line")
     recorder = task_train(config.get("task"), experiment_name=experiment_name)
     recorder.save_objects(config=config)
 

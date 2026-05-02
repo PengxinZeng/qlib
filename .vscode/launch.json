@@ -9,69 +9,17 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Download Gold Data",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "scripts/data_collector/yahoo/collector.py",
-            "args": [
-                "download_data",
-                "--source_dir",
-                "~/.qlib/qlib_data/gold_source",
-                "--start_date",
-                "2025-01-01",
-                "--end_date",
-                "2026-12-31",
-                "--delay",
-                "1",
-                "--code_list",
-                "GC=F",
-                "ignore_index",
-            ],
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "Qlib Dump Gold Bin",
-            "type": "python",
-            "request": "launch",
-            "program": "scripts/dump_bin.py",
-            "args": [
-                "dump_all",
-                "--data_path", "~/.qlib/qlib_data/gold_source_debug/",
-                "--qlib_dir", "~/.qlib/qlib_data/gold_source_debug/",
-                "--include_fields", "open,high,low,close,volume,factor",
-                "--date_field_name", "date"
-            ],
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
         },
         {
             "name": "Qlib qrun",
             "type": "python",
             "request": "launch",
-            // "module": "qlib.cli.run", 
             "program": "qlib/cli/run.py",
             "args": [
-                "examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml"
-            ],
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "justMyCode": false 
-        },
-        {
-            "name": "workflow_by_code",
-            "type": "python",
-            "request": "launch",
-            "program": "examples/workflow_by_code.py",
-            "args": [
-                "backtest_analysis",
-                "examples/benchmarks/LightGBM/workflow_config_lightgbm_gold_weightedTrading.yaml",
-                // "examples/benchmarks/LightGBM/workflow_config_lightgbm_gold.yaml",
-                "aeaecb83c65545df83c543dce2f13a9d",
-                "724594780217528450"
+                "examples/benchmarks/HistRelaPB/workflow_config.yaml"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",

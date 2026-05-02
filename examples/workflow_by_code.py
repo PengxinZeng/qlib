@@ -15,11 +15,19 @@ from qlib.workflow.record_temp import SignalRecord, PortAnaRecord, SigAnaRecord
 def draw_analysis_figures(recorder_id, experiment_id, dataset):
     # analyze graphs
     recorder = R.get_recorder(recorder_id=recorder_id, experiment_id=experiment_id)
-    print(recorder)
+    print(f"Recorder: {recorder}")
+    print(f"Experiment ID: {recorder.experiment_id}")
+    print(f"Recorder ID: {recorder.id}")
+
     pred_df = recorder.load_object("pred.pkl")
     report_normal_df = recorder.load_object("portfolio_analysis/report_normal_1day.pkl")
     positions = recorder.load_object("portfolio_analysis/positions_normal_1day.pkl")
     analysis_df = recorder.load_object("portfolio_analysis/port_analysis_1day.pkl")
+
+    # 使用recorder的artifact_uri获取正确路径
+    artifact_uri = str(recorder.artifact_uri).replace('file://', '')
+    save_root = os.path.join(artifact_uri, "analysis_csvs")
+    os.makedirs(save_root, exist_ok=True)
 
     csv_dict = {
         "pred_df": pred_df,
@@ -27,8 +35,6 @@ def draw_analysis_figures(recorder_id, experiment_id, dataset):
         # "positions": positions,
         "analysis_df": analysis_df,
     }
-    save_root = os.path.join(recorder._uri.replace('file:', ''), recorder.experiment_id, recorder.id, "analysis_csvs")
-    os.makedirs(save_root, exist_ok=True)
     for csv_type, csv_data in csv_dict.items():
         save_path = os.path.join(save_root, f"{csv_type}.csv")
         print(f"Save {csv_type} to local file: {save_path}")
@@ -61,7 +67,7 @@ def draw_analysis_figures(recorder_id, experiment_id, dataset):
         "score_ic": fig_list_score_ic,
         "model_performance": fig_list_model_performance,
     }
-    save_root = os.path.join(recorder._uri.replace('file:', ''), recorder.experiment_id, recorder.id, "analysis_figures")
+    save_root = os.path.join(artifact_uri, "analysis_figures")
     os.makedirs(save_root, exist_ok=True)
     for fig_type, _fig_list in fig_dict.items():
         for idx, _fig in enumerate(_fig_list):
@@ -127,15 +133,39 @@ def backtest_analysis(config_path, recorder_id, experiment_id):
     draw_analysis_figures(recorder_id=recorder_id, experiment_id=experiment_id, dataset=dataset)
 
 
+def analyze_existing_results(config_path, recorder_id, experiment_id):
+    """分析已有的实验结果（不重新运行backtest）"""
+    config = qlib.cli.run.load_config(config_path)
+    task = config.get("task", {})
+
+    # 初始化qlib，指定正确的mlruns路径
+    if "exp_manager" in config.get("qlib_init", {}):
+        qlib.init(**config.get("qlib_init"))
+    else:
+        from qlib.config import C
+        exp_manager = C["exp_manager"]
+        # 使用实际的mlruns路径
+        mlruns_uri = "file:///Users/zengpengxin/workspace/CodeBase/qlib/mlruns"
+        exp_manager["kwargs"]["uri"] = mlruns_uri
+        qlib.init(**config.get("qlib_init"), exp_manager=exp_manager)
+        print(f"MLflow tracking URI: {mlruns_uri}")
+
+    # 初始化数据集（用于label对比）
+    dataset = init_instance_by_config(task["dataset"])
+
+    # 直接分析已有结果
+    draw_analysis_figures(recorder_id=recorder_id, experiment_id=str(experiment_id), dataset=dataset)
+
+
 def main():
-    backtest_analysis(
-        # config_path="examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml", 
-        config_path="examples/benchmarks/LightGBM/workflow_config_lightgbm_gold.yaml", 
-        recorder_id="aeaecb83c65545df83c543dce2f13a9d", 
-        experiment_id="724594780217528450",
+    # 分析 HistRelaPB 实验结果
+    analyze_existing_results(
+        config_path="benchmarks/HistRelaPB/workflow_config.yaml",
+        recorder_id="70a489f6ed1c49a79fb54371c07dc34e",
+        experiment_id="615697135128701704",
     )
 
 
 if __name__ == "__main__":
-    fire.Fire()
-    # main()
+    # fire.Fire()
+    main()

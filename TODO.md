@@ -40,7 +40,7 @@
 - [ ] 基金动态卖出费率/买入费率
 
 # Model
-## Handy
+## Hand Craft
 - [x] ALL-IN + Val set Top-K选股
 - [x] MACD + Val set Top-K选股
 - [ ] MACD-周频月频 + Val set Top-K选股
@@ -62,8 +62,3 @@
 
 # 其他
 - [ ] 辉哥
-
-# Code Push
-git add .
-git commit -m "PbPe Strategy Updates"
-git push origin main
