@@ -1,6 +1,9 @@
 """
-时间序列归一化价格可视化 (merged2版本)
-保留所有原始列
+ETF归一化价格可视化 - 跟踪误差分析
+
+展示基金后复权价格 vs 跟踪指数归一化曲线，以基金上市日为基准。
+
+环境要求: conda activate rdagent
 """
 
 import pandas as pd
@@ -13,8 +16,9 @@ plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
 # 路径配置
-MERGED_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/stock_data/merged2")
-REPORT_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/stock_data/report/normalized2")
+QLIB_BASE  = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415")
+MERGED_DIR = QLIB_BASE / "source" / "etf_index" / "merged"
+REPORT_DIR = QLIB_BASE / "qlib_etf_index_Extend_wBond" / "data_distribution" / "TrackingError"
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -30,83 +34,63 @@ def get_fund_name(fund_code: str) -> str:
     return fund_code
 
 
-def normalize_aligned(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_aligned(df: pd.DataFrame):
     """
     对齐归一化：
-    以基金后复权价格为基准，将跟踪指数对齐到后复权价格
+    以基金后复权价格(close)为基准，将跟踪指数对齐到基金首日价格。
+    返回 (df_with_norm_cols, base_date, base_price)
     """
     df = df.copy()
     df = df.sort_values('date').reset_index(drop=True)
 
-    price_cols = [col for col in ['raw_close', 'hfq_close', 'index_close'] if col in df.columns]
-
-    if not price_cols:
+    if 'close' not in df.columns and 'index_close' not in df.columns:
         return df, None, None
 
     base_date = None
     base_price = None
 
-    # 优先使用后复权价格作为基准
-    if 'hfq_close' in df.columns:
-        hfq_valid = df[df['hfq_close'].notna()]
-        if len(hfq_valid) > 0:
-            base_date = hfq_valid.iloc[0]['date']
-            base_price = hfq_valid.iloc[0]['hfq_close']
-
-    # 如果没有后复权，用除权价格
-    if base_date is None and 'raw_close' in df.columns:
-        raw_valid = df[df['raw_close'].notna()]
-        if len(raw_valid) > 0:
-            base_date = raw_valid.iloc[0]['date']
-            base_price = raw_valid.iloc[0]['raw_close']
+    # 以基金收盘价首日为基准
+    if 'close' in df.columns:
+        valid = df[df['close'].notna()]
+        if len(valid) > 0:
+            base_date  = valid.iloc[0]['date']
+            base_price = valid.iloc[0]['close']
 
     if base_date is None or base_price is None or base_price == 0:
         return df, None, None
 
-    # 后复权价格归一化（除以首日价格）
-    if 'hfq_close' in df.columns:
-        df['hfq_close_norm'] = df['hfq_close'] / base_price
+    # 基金价格归一化
+    df['close_norm'] = df['close'] / base_price
 
-    # 除权价格归一化（除以自己的首日价格）
-    if 'raw_close' in df.columns:
-        raw_first = df[df['raw_close'].notna()].iloc[0]['raw_close'] if len(df[df['raw_close'].notna()]) > 0 else None
-        if raw_first and raw_first != 0:
-            df['raw_close_norm'] = df['raw_close'] / raw_first
-
-    # 指数对齐到基金后复权价格
+    # 指数对齐到基金上市日
     if 'index_close' in df.columns:
         idx_valid = df[df['index_close'].notna()]
-        if len(idx_valid) == 0:
-            pass
-        else:
+        if len(idx_valid) > 0:
             index_first_date = idx_valid.iloc[0]['date']
-            index_first_price = idx_valid.iloc[0]['index_close']
 
             if index_first_date > base_date:
-                # 指数比基金晚出现，需要找到第一个重叠日期
-                overlap = df[df['hfq_close'].notna() & df['index_close'].notna()]
+                # 指数比基金晚，在首个重叠日对齐
+                overlap = df[df['close'].notna() & df['index_close'].notna()]
                 if len(overlap) > 0:
-                    hfq_at_align = overlap.iloc[0]['hfq_close']
+                    fund_at_align  = overlap.iloc[0]['close']
                     index_at_align = overlap.iloc[0]['index_close']
-
-                    target_norm_value = hfq_at_align / base_price
-                    df['index_close_norm'] = (df['index_close'] / index_at_align) * target_norm_value
+                    target_norm    = fund_at_align / base_price
+                    df['index_close_norm'] = (df['index_close'] / index_at_align) * target_norm
                 else:
-                    df['index_close_norm'] = df['index_close'] / index_first_price
+                    df['index_close_norm'] = df['index_close'] / idx_valid.iloc[0]['index_close']
             else:
-                # 指数在基金上市日或之前就有数据
-                idx_row = df[df['date'] == base_date]
-                if len(idx_row) > 0 and pd.notna(idx_row['index_close'].iloc[0]):
-                    index_price_at_base = idx_row['index_close'].iloc[0]
-                    df['index_close_norm'] = df['index_close'] / index_price_at_base
+                # 指数在基金上市日或之前就有数据，在上市日对齐
+                row_at_base = df[df['date'] == base_date]
+                if len(row_at_base) > 0 and pd.notna(row_at_base['index_close'].iloc[0]):
+                    df['index_close_norm'] = df['index_close'] / row_at_base['index_close'].iloc[0]
                 else:
-                    df['index_close_norm'] = df['index_close'] / index_first_price
+                    df['index_close_norm'] = df['index_close'] / idx_valid.iloc[0]['index_close']
 
     return df, base_date, base_price
 
 
 def plot_normalized_time_series(fund_code: str, df: pd.DataFrame, fund_name: str):
-    """绘制归一化价格时间序列图"""
+    """绘制归一化价格时间序列图（跟踪误差）"""
     fig, ax = plt.subplots(figsize=(14, 8))
 
     df_norm, base_date, base_price = normalize_aligned(df)
@@ -117,9 +101,8 @@ def plot_normalized_time_series(fund_code: str, df: pd.DataFrame, fund_name: str
         return None
 
     colors = {
-        'raw_close_norm': ('blue', '除权价格'),
-        'hfq_close_norm': ('orange', '后复权价格'),
-        'index_close_norm': ('gray', '跟踪指数')
+        'close_norm':       ('orange', '基金价格(后复权)'),
+        'index_close_norm': ('gray',   '跟踪指数'),
     }
 
     has_data = False
@@ -137,19 +120,21 @@ def plot_normalized_time_series(fund_code: str, df: pd.DataFrame, fund_name: str
         return None
 
     ax.axhline(y=1, color='black', linestyle=':', alpha=0.5, label='基准线(=1.0)')
-
     ax.axvline(x=base_date, color='red', linestyle='--', alpha=0.5)
-    ax.text(base_date, 1.02, f'基金上市日\n{base_date.strftime("%Y-%m-%d")}',
-           ha='center', fontsize=9, color='red',
-           bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+    ax.text(base_date, ax.get_ylim()[1] * 0.98 if ax.get_ylim()[1] > 1 else 1.02,
+            f'基金上市日\n{base_date.strftime("%Y-%m-%d")}',
+            ha='center', fontsize=9, color='red',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
-    ax.set_title(f'{fund_code} {fund_name}\n归一化价格时间序列 (基金上市日价格={base_price:.4f})', fontsize=14)
+    ax.set_title(f'{fund_code} {fund_name}\n归一化价格对比 - 跟踪误差分析 (基金上市日=1.0)', fontsize=14)
     ax.set_xlabel('日期', fontsize=12)
-    ax.set_ylabel('归一化价格 (基金上市日=1.0)', fontsize=12)
+    ax.set_ylabel('归一化价格', fontsize=12)
     ax.legend(loc='upper left', fontsize=10)
     ax.grid(True, alpha=0.3)
 
-    info_text = f"数据点数: {len(df)}\n基金上市日: {base_date.strftime('%Y-%m-%d')}\n后复权首日价: {base_price:.4f}"
+    info_text = (f"数据点数: {len(df)}\n"
+                 f"基金上市日: {base_date.strftime('%Y-%m-%d')}\n"
+                 f"首日价格: {base_price:.4f}")
     ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=9,
            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
@@ -163,14 +148,15 @@ def plot_normalized_time_series(fund_code: str, df: pd.DataFrame, fund_name: str
 
 
 def main():
-    merged_files = sorted(MERGED_DIR.glob("*.csv"))
+    merged_files = sorted(MERGED_DIR.glob("*_clean.csv"))
 
     fund_plots = []
 
     print(f"生成 {len(merged_files)} 个归一化价格时间序列图...")
+    print(f"输出目录: {REPORT_DIR}")
 
     for file_path in tqdm(merged_files):
-        fund_code = file_path.stem.replace('_merged', '')
+        fund_code = file_path.stem.replace('_clean', '')
         fund_name = get_fund_name(fund_code)
 
         df = pd.read_csv(file_path)

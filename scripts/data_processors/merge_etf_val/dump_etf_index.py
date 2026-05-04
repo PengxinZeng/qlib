@@ -1,6 +1,8 @@
 """
 将etf_index数据转换为qlib数据集
-保留所有列：基金k线、指数k线、指数估值数据
+保留所有列：基金k线、指数k线、指数估值数据、国债收益率
+
+环境要求: conda activate rdagent
 """
 
 import pandas as pd
@@ -52,9 +54,14 @@ def save_symbol_data(args):
         np.hstack([date_index, field_data]).astype('<f').tofile(str(bin_path.resolve()))
 
 
+QLIB_BASE = "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415"
+DEFAULT_DATA_PATH = f"{QLIB_BASE}/source/etf_index/merged"
+DEFAULT_QLIB_DIR  = f"{QLIB_BASE}/qlib_etf_index_Extend_wBond"
+
+
 def convert_etf_index_to_qlib(
-    data_path: str,
-    qlib_dir: str,
+    data_path: str = DEFAULT_DATA_PATH,
+    qlib_dir: str = DEFAULT_QLIB_DIR,
     freq: str = "day",
     max_workers: int = 16,
     date_field_name: str = "date",

@@ -6,7 +6,7 @@ HistRelaPB Signal - 基于PB历史百分位的交易信号
 
 import numpy as np
 import pandas as pd
-from typing import Union
+from typing import Optional, Union
 
 from qlib.model.base import Model
 from qlib.data.dataset import DatasetH
@@ -30,6 +30,7 @@ class HistRelaPBSignal(Model):
         oversold_threshold: float = 0.10,
         overbought_threshold: float = 0.90,
         volume_threshold: float = 0.0,
+        spread_threshold: Optional[float] = None,
         freq: str = "day",
     ):
         """
@@ -46,6 +47,10 @@ class HistRelaPBSignal(Model):
             超买阈值，高于此百分位产生卖出信号
         volume_threshold : float
             成交量阈值，低于此值的交易日数据将被忽略
+        spread_threshold : float or None
+            股债利差阈值（单位 %）：盈利收益率(1/PE_TTM*100) - CN 2Y 国债收益率
+            仅当 spread >= spread_threshold 时才产生买入信号（score=1）
+            默认 None，不启用利差过滤
         freq : str
             数据频率
         """
@@ -55,6 +60,7 @@ class HistRelaPBSignal(Model):
         self.oversold_threshold = float(oversold_threshold)
         self.overbought_threshold = float(overbought_threshold)
         self.volume_threshold = float(volume_threshold)
+        self.spread_threshold = float(spread_threshold) if spread_threshold is not None else None
         self.freq = freq
 
     def fit(self, dataset: DatasetH, reweighter=None):
@@ -95,7 +101,15 @@ class HistRelaPBSignal(Model):
             return pd.DataFrame(columns=["score", "percentile", "current_pb", "close"])
 
         # 提取必要列
-        df = df[["pb", "close", "volume"]].copy()
+        base_cols = ["pb", "close", "volume"]
+        if self.spread_threshold is not None:
+            if "pe_ttm" not in df.columns or "cn_2y" not in df.columns:
+                raise ValueError(
+                    "spread_threshold 需要数据集包含 pe_ttm 和 cn_2y 字段，"
+                    "请在 workflow_config 的 handler fields 中添加这两个字段。"
+                )
+            base_cols += ["pe_ttm", "cn_2y"]
+        df = df[base_cols].copy()
         
         # 注意：经过Handler处理后，不需要额外过滤
         # 直接使用pb数据计算百分位
@@ -140,7 +154,17 @@ class HistRelaPBSignal(Model):
         # 生成信号：不可交易日强制 score=0（无论 percentile 如何）
         result["score"] = 0
         tradable_mask = result["tradable"]
-        result.loc[tradable_mask & (result["percentile"] < self.oversold_threshold), "score"] = 1
+        buy_mask = tradable_mask & (result["percentile"] < self.oversold_threshold)
+
+        # 如果启用了利差过滤，计算 spread 并附加条件
+        if self.spread_threshold is not None:
+            pe_ttm = df["pe_ttm"].reindex(result.index)
+            cn_2y  = df["cn_2y"].reindex(result.index)
+            spread = (1.0 / pe_ttm * 100).where(pe_ttm > 0) - cn_2y
+            result["spread"] = spread
+            buy_mask = buy_mask & (spread >= self.spread_threshold)
+        
+        result.loc[buy_mask, "score"] = 1
         result.loc[tradable_mask & (result["percentile"] > self.overbought_threshold), "score"] = -1
 
         # 过滤结果，只返回原始segment范围内的数据（去除lookback的历史数据）

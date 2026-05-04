@@ -14,9 +14,9 @@ import qlib
 from qlib.data import D
 
 # 路径配置
-DATA_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index")
-OUTPUT_DIR = Path(__file__).parent / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+DATA_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond")
+OUTPUT_DIR = DATA_DIR / "data_distribution" / "AllETF"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # 基金名称映射
 FUNDS_LIST_CSV = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/source/funds_list.csv")

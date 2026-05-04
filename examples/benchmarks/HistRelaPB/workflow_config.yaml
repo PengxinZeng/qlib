@@ -1,5 +1,5 @@
 qlib_init:
-    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend"
+    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond"
     region: cn
 
 # MLflow配置 - 指定实验结果保存位置
@@ -9,7 +9,7 @@ mlflow_tracking_uri: "file:./mlruns"
 experiment_name: hist_rela_pb_etf
 
 market: &market all
-benchmark: &benchmark "510300_NORMED"
+benchmark: &benchmark "510050_CLEAN"
 
 # 回测配置
 port_analysis_config: &port_analysis_config
@@ -18,7 +18,7 @@ port_analysis_config: &port_analysis_config
         module_path: qlib.contrib.strategy.signal_strategy
         kwargs:
             signal: <PRED>
-            risk_degree: 0.95
+            risk_degree: 1.0
             max_stock_weight: 1.0
     backtest:
         start_time: "2005-02-23"
@@ -39,11 +39,12 @@ task:
         class: HistRelaPBSignal
         module_path: qlib.contrib.model.hist_rela_pb_signal
         kwargs:
-            lookback_days: 1033      # 历史回看窗口天数（使用全部历史数据）
-            min_valid_days_ratio: 0.8    # 最小有效数据天数 = int(lookback_days * ratio)
-            oversold_threshold: 0.09    # 超卖阈值（买入信号）
-            overbought_threshold: 0.63  # 超买阈值（卖出信号）
+            lookback_days: 982       # 历史回看窗口天数
+            min_valid_days_ratio: 0.45   # 最小有效数据天数 = int(lookback_days * ratio)
+            oversold_threshold: 0.04    # 超卖阈值（买入信号）
+            overbought_threshold: 0.76  # 超买阈值（卖出信号）
             volume_threshold: 0.0       # 成交量阈值
+            spread_threshold: 5.0       # 股债利差阈值(%)：1/PE_TTM*100 - CN 2Y >= 5.9% 才触发买入
             freq: "day"
 
     dataset:
@@ -69,6 +70,7 @@ task:
                         - "$pb_median"
                         - "$pe_ttm"
                         - "$pe_ttm_median"
+                        - "$cn_2y"
                     field_names:
                         - "open"
                         - "high"
@@ -79,6 +81,7 @@ task:
                         - "pb_median"
                         - "pe_ttm"
                         - "pe_ttm_median"
+                        - "cn_2y"
                     # 只使用ProcessInf处理无穷值
                     infer_processors:
                         - class: ProcessInf

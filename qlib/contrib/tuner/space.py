@@ -30,11 +30,11 @@ HistRelaPBModelSpace = {
     # 均匀离散分布，步长 0.01
     "overbought_threshold": hp.quniform("hist_rela_pb_overbought_threshold", 0.40, 0.98, 0.01),
     "volume_threshold": 0.0,   # 固定值，不参与搜索
+    "spread_threshold": 5.9,
     "freq": "day",
 }
 
 EvenWeightStrategySpace = {
     "risk_degree": 0.95,       # 固定值，不参与搜索
-    # 均匀连续分布 [0.05, 1.0]，最大单标的权重
-    "max_stock_weight": hp.quniform("even_weight_max_stock_weight", 0.40, 1.0, 0.01),
+    "max_stock_weight": 1.0,
 }
