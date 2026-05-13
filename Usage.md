@@ -74,7 +74,7 @@ ls mlruns/<experiment_id>/<recorder_id>/artifacts/
 # 代码
 ```
 git add .
-git commit -m "Hist Rela Pb: cn_2y prof"
+git commit -m "add benchmark_summary_qlib_etf_index_Extend_wBond"
 git push origin main
 ```
 

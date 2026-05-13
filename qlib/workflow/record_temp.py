@@ -778,10 +778,26 @@ class ReportRecord(RecordTemp):
         if positions_rows:
             positions_df = pd.DataFrame.from_dict(positions_rows, orient="index")
             positions_df.index.name = "date"
-            # 把 cash 和 account_value 移到最后两列，其余按列名排序
-            fixed_cols = [c for c in ("cash", "account_value") if c in positions_df.columns]
+            # 把 cash 和 account_value 移到最后两列,其余按列名排序
+            fixed_cols = [c for c in ("account_value") if c in positions_df.columns]
             stock_cols = sorted(c for c in positions_df.columns if c not in fixed_cols)
             positions_df = positions_df[stock_cols + fixed_cols]
+            
+            # 计算总持有率：每只基金的平均持仓占比（排除cash和account_value列）
+            total_holding_ratio = {}
+            for col in stock_cols:
+                # 计算该基金每天的持仓占比（持仓价值/总账户价值）
+                ratio_series = positions_df[col] / positions_df["account_value"]
+                # 计算平均持仓占比
+                total_holding_ratio[col] = ratio_series.mean()
+            # 添加fixed_cols的占位值
+            for col in fixed_cols:
+                total_holding_ratio[col] = float("nan")
+            
+            # 将总持有率作为新行添加到DataFrame
+            total_holding_df = pd.DataFrame([total_holding_ratio], index=["total_holding_ratio"])
+            positions_df = pd.concat([positions_df, total_holding_df])
+            
             positions_csv_path = os.path.join(save_root, "positions_daily.csv")
             positions_df.to_csv(positions_csv_path)
             logger.info(f"Save positions_daily to local file: {positions_csv_path}")

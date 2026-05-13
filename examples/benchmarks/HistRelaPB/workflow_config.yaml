@@ -11,6 +11,19 @@ experiment_name: hist_rela_pb_etf
 market: &market all
 benchmark: &benchmark "510050_CLEAN"
 
+# 时间参数配置
+time_config:
+    data_start: &data_start "2005-02-23"
+    data_end: &data_end "2026-04-13"
+    train_start: &train_start "2005-02-23"
+    train_end: &train_end "2017-01-03"
+    valid_start: &valid_start "2017-01-04"
+    valid_end: &valid_end "2019-10-08"
+    backtest_start: &backtest_start "2005-02-23"
+    backtest_end: &backtest_end "2019-10-08"
+    # backtest_start: &backtest_start "2019-10-09"
+    # backtest_end: &backtest_end "2026-04-13"
+
 # 回测配置
 port_analysis_config: &port_analysis_config
     strategy:
@@ -21,8 +34,8 @@ port_analysis_config: &port_analysis_config
             risk_degree: 1.0
             max_stock_weight: 1.0
     backtest:
-        start_time: "2005-02-23"
-        end_time: "2019-10-08"
+        start_time: *backtest_start
+        end_time: *backtest_end
         account: 1000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -55,10 +68,10 @@ task:
                 class: RawFieldsHandler
                 module_path: qlib.contrib.data.handler_raw_fields
                 kwargs:
-                    start_time: 2005-02-23
-                    end_time: 2026-04-13
-                    fit_start_time: 2005-02-23
-                    fit_end_time: 2017-01-03
+                    start_time: *data_start
+                    end_time: *data_end
+                    fit_start_time: *train_start
+                    fit_end_time: *train_end
                     instruments: *market
                     fields: 
                         - "$open"
@@ -90,9 +103,9 @@ task:
                         - class: ProcessInf
                           kwargs: {}
             segments:
-                train: [2005-02-23, 2017-01-03]
-                valid: [2017-01-04, 2019-10-08]
-                test: [2005-02-23, 2019-10-08]  # 临时调整为train+valid用于参数调优
+                train: [*train_start, *train_end]
+                valid: [*valid_start, *valid_end]
+                test: [*backtest_start, *backtest_end]  # 临时调整为train+valid用于参数调优
 
     record:
         - class: SignalRecord
