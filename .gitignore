@@ -57,3 +57,4 @@ tags
 
 # vscode workspace
 qlib.code-workspace
+*.log

@@ -5,6 +5,17 @@ conda activate rdagent
 
 # 数据
 流程是1. 下载数据; 2. 转化为qlib bin; 3. 数据质量检查
+
+## 日频更新（qlib_etf_index_Extend_wBond）
+每个交易日收盘后运行（建议 16:00 后）：
+```
+python scripts/daily_update.py
+```
+流程：ETF K线(hfq+raw) → 指数K线+估值 → 国债收益率 → 合并清洗 → 转 qlib bin
+
+- 交易日判断：自动跳过周末，节假日维护在 `scripts/holidays_cn.txt`（每年更新一次）
+- 日志：`logs/daily_update/YYYY-MM-DD.log`
+- baostock 不稳定时 `index_*` 字段自动填 NaN，不阻断流程
 ## 下载数据
 | 数据源 | A股K线 | A股估值 | ETF基金K线 | ETF基金估值 | 指数K线 | 指数估值 | 商品ETF基金K线 | 主动基金K线 | 主动基金估值 | 中美2/5/10/30年期国债利率 ｜
 |--------|--------|---------|------------|-------------|---------|----------|------------|-------------|--------------|--------------|
@@ -33,7 +44,7 @@ python scripts/data_collector/yahoo/collector.py download_data `
 ```
 
 ### 东财国债数据
-python data_collector/eastmoney_bond_rate/collector.py download_bond_rate \
+python scripts/data_collector/eastmoney_bond_rate/collector.py download_bond_rate \
     --source_dir ~/.qlib/stock_data/source/cn_bond_rate \
     --start_date 2000-01-01 \
     --delay 1.0
@@ -74,7 +85,7 @@ ls mlruns/<experiment_id>/<recorder_id>/artifacts/
 # 代码
 ```
 git add .
-git commit -m "add benchmark_summary_qlib_etf_index_Extend_wBond"
+git commit -m "add MACD, add daily_update"
 git push origin main
 ```
 

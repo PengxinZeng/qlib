@@ -63,6 +63,7 @@ class TencentETFCollector:
         funds_list_path: str = None,
         fq_type: str = "hfq",
         delay: float = 0.5,
+        only_with_index: bool = True,
     ):
         """
         Parameters
@@ -77,6 +78,8 @@ class TencentETFCollector:
             复权类型: hfq=后复权(默认), qfq=前复权, 空=不复权
         delay: float
             请求间隔，默认 0.5 秒
+        only_with_index: bool
+            仅下载 track_target_file 非 N/A 的 ETF（默认 True）
         """
         self.save_dir = Path(save_dir).expanduser().resolve()
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +87,7 @@ class TencentETFCollector:
         self.funds_list_path = funds_list_path
         self.fq_type = str(fq_type) if fq_type else ""
         self.delay = delay
+        self.only_with_index = only_with_index
 
     @staticmethod
     def normalize_tencent_symbol(symbol: str) -> str:
@@ -219,6 +223,18 @@ class TencentETFCollector:
         df = pd.read_csv(self.funds_list_path, dtype=str, comment="#")
         df = df.dropna(subset=["fund_code"])
 
+        # 默认只下载有对应指数文件的 ETF
+        if self.only_with_index and "track_target_file" in df.columns:
+            before = len(df)
+            df = df[
+                df["track_target_file"].notna() &
+                df["track_target_file"].str.strip().ne("") &
+                df["track_target_file"].str.strip().ne("N/A")
+            ]
+            excluded = before - len(df)
+            if excluded:
+                logger.info(f"Excluded {excluded} ETFs without index file (only_with_index=True)")
+
         etf_list = []
         skipped = []
         for _, row in df.iterrows():
@@ -292,6 +308,7 @@ class Run(BaseRun):
         funds_list: str = None,
         fq_type: str = "hfq",
         delay: float = 0.5,
+        only_with_index: bool = True,
     ):
         """下载 ETF K线数据（支持完整历史+复权）
 
@@ -307,6 +324,8 @@ class Run(BaseRun):
             复权类型: hfq=后复权(默认), qfq=前复权, 空=不复权
         delay: float
             请求间隔，默认 0.5 秒
+        only_with_index: bool
+            仅下载 track_target_file 非 N/A 的 ETF，默认 True
 
         Examples
         ---------
@@ -316,10 +335,15 @@ class Run(BaseRun):
                 --source_dir ~/.qlib/stock_data/source/cn_etf_tencent \
                 --fq_type hfq
 
-            # 从 funds_list.csv 批量下载
+            # 从 funds_list.csv 批量下载（默认仅含指数映射的 ETF）
             $ python collector.py download_etf \
                 --funds_list /path/to/funds_list.csv \
                 --source_dir ~/.qlib/stock_data/source/cn_etf_tencent
+
+            # 下载全部 ETF（含无指数映射的）
+            $ python collector.py download_etf \
+                --funds_list /path/to/funds_list.csv \
+                --only_with_index False
         """
         if not funds_list and not symbols:
             logger.warning("Please specify --funds_list or --symbols")
@@ -337,6 +361,7 @@ class Run(BaseRun):
             funds_list_path=funds_list,
             fq_type=str(fq_type) if fq_type else "",
             delay=delay,
+            only_with_index=only_with_index,
         )
         collector.collector_etf_kline()
 

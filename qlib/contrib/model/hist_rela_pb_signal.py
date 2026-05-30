@@ -17,10 +17,19 @@ class HistRelaPBSignal(Model):
     """
     PB历史百分位信号生成器
 
-    每天计算每个标的的PB在其历史k天PB数据中的百分位：
-    - percentile < oversold_threshold -> 信号 1 (买入)
-    - percentile > overbought_threshold -> 信号 -1 (卖出)
-    - 否则 -> 信号 0 (持有)
+    每天独立计算每个标的的 PB 在其历史 lookback_days 内的百分位，
+    **不维护跨日状态**，持仓连续性依赖信号连续性：
+
+    信号逻辑（三值信号，配合 EvenWeightStrategy）：
+    - score =  1：percentile < oversold_threshold  → 超卖区，买入/持有
+    - score = -1：percentile > overbought_threshold → 超买区，卖出
+    - score =  0：中性区 → 配合 EvenWeightStrategy：
+                  已持有的继续持有（不卖出），未持有的不新买
+
+    持仓维护机制：
+      PB 连续低于超卖阈值 → 每日 score=1 → EvenWeightStrategy 持续持仓
+      PB 回到中性区        → score=0    → 已持有则保仓，未持有则不买
+      PB 超过超买阈值      → score=-1   → EvenWeightStrategy 强制平仓
     """
 
     def __init__(

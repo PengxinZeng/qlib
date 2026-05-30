@@ -1,11 +1,9 @@
 import argparse
-import multiprocessing as mp
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import akshare as ak
-import baostock as bs
 import pandas as pd
 
 try:
@@ -26,12 +24,6 @@ def _call_with_retry(func: Callable[..., pd.DataFrame], *args: Any, retry: int =
     raise RuntimeError(f"AkShare request failed after {retry} retries: {last_error}") from last_error
 
 
-def _to_ak_symbol(lg_code: str) -> str:
-    # 000016.SH -> sh000016
-    code, market = lg_code.split(".")
-    return f"{market.lower()}{code}"
-
-
 def _to_filename(lg_code: str) -> str:
     # 000016.SH -> SH000016
     code, market = lg_code.split(".")
@@ -50,45 +42,6 @@ def _filter_by_date(df: pd.DataFrame, start: str | None, end: str | None) -> pd.
         dt = pd.to_datetime(df[date_col], errors="coerce")
     df[date_col] = dt.dt.strftime("%Y-%m-%d")
     return df
-
-
-def _to_baostock_symbol(symbol: str) -> str:
-    # sh000016 -> sh.000016
-    return f"{symbol[:2]}.{symbol[2:]}"
-
-
-def fetch_price(symbol: str, start: str | None, end: str | None) -> pd.DataFrame:
-    bs_code = _to_baostock_symbol(symbol)
-    fields = "date,code,open,high,low,close,volume,amount,pctChg"
-
-    login_res = bs.login()
-    if login_res.error_code != "0":
-        raise RuntimeError(f"baostock login failed: {login_res.error_msg}")
-
-    try:
-        rs = bs.query_history_k_data_plus(
-            code=bs_code,
-            fields=fields,
-            start_date=start or "1990-01-01",
-            end_date=end or "2050-01-01",
-            frequency="d",
-        )
-        if rs.error_code != "0":
-            raise RuntimeError(f"baostock query failed for {bs_code}: {rs.error_msg}")
-
-        rows = []
-        while rs.next():
-            rows.append(rs.get_row_data())
-
-        if not rows:
-            raise RuntimeError(f"empty baostock price data for {bs_code}")
-
-        df = pd.DataFrame(rows, columns=fields.split(","))
-        for col in ["open", "high", "low", "close", "volume", "amount", "pctChg"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        return _filter_by_date(df, start, end)
-    finally:
-        bs.logout()
 
 
 def fetch_valuation(index_name: str, start: str | None, end: str | None) -> pd.DataFrame:
@@ -132,76 +85,71 @@ def parse_indexes(symbols_text: str | None) -> list[str]:
     return indexes
 
 
-def download_one(index_name: str, save_dir: str, start: str | None, end: str | None) -> None:
+def download_one(index_name: str, save_dir: str, start: str | None, end: str | None) -> tuple[str, int]:
+    """下载单只指数，返回 (index_name, rows)"""
+    import time as _time
     lg_code = LG_INDEX_SYMBOL_MAP[index_name]
-    symbol = _to_ak_symbol(lg_code)
+    t0 = _time.time()
 
-    price_df = fetch_price(symbol, start, end)
-    valuation_df = fetch_valuation(index_name, start, end)
+    try:
+        valuation_df = fetch_valuation(index_name, start, end)
+    except Exception as e:
+        raise RuntimeError(f"valuation failed: {e}") from e
 
-    merged = price_df.merge(valuation_df, left_on="date", right_on="日期", how="inner")
-    if merged.empty:
-        raise RuntimeError(f"no merged rows for {index_name}")
+    if valuation_df.empty:
+        raise RuntimeError("valuation empty")
 
-    merged = merged.drop(columns=["日期", "指数_pe", "指数_pb"], errors="ignore")
+    merged = valuation_df.rename(columns={"日期": "date"})
+    merged = merged.drop(columns=["指数_pe", "指数_pb"], errors="ignore")
     merged = rename_columns_to_english(merged)
 
     output_dir = Path(save_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     out_file = output_dir / f"{_to_filename(lg_code)}.csv"
+
+    if out_file.exists():
+        existing = pd.read_csv(out_file)
+        merged = pd.concat([existing, merged], ignore_index=True)
+        merged = merged.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+
     merged.to_csv(out_file, index=False)
-
-    print(f"[ok] {index_name} -> {out_file.name}, rows={len(merged)}")
-
-
-def _download_one_worker(index_name: str, save_dir: str, start: str | None, end: str | None, queue: mp.Queue) -> None:
-    try:
-        download_one(index_name, save_dir, start, end)
-        queue.put((True, ""))
-    except Exception as exc:  # noqa: BLE001
-        queue.put((False, str(exc)))
+    elapsed = _time.time() - t0
+    print(f"[ok] {index_name} -> {out_file.name}  rows={len(merged)}  {elapsed:.1f}s", flush=True)
+    return index_name, len(merged)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download LG-supported index price + valuation data")
+    parser = argparse.ArgumentParser(description="Download LG-supported index valuation data (AkShare)")
     parser.add_argument("--symbols", type=str, default=None, help="index names or LG codes, comma separated")
     parser.add_argument("--save_dir", type=str, default=str(Path(__file__).resolve().parent / "source"))
     parser.add_argument("--start", type=str, default=None)
     parser.add_argument("--end", type=str, default=None)
-    parser.add_argument("--task_timeout", type=int, default=180, help="timeout in seconds for each index download")
+    parser.add_argument("--delay", type=float, default=3.0, help="每只指数下载后等待秒数，避免触发频率限制（默认 3s）")
     args = parser.parse_args()
 
     indexes = parse_indexes(args.symbols)
-    print(f"start downloading {len(indexes)} LG-supported indexes, timeout={args.task_timeout}s each...")
+    total = len(indexes)
+    print(f"start downloading {total} indexes (serial, delay={args.delay}s)...", flush=True)
 
+    done = 0
     failed: list[str] = []
     for idx in indexes:
-        queue: mp.Queue = mp.Queue()
-        proc = mp.Process(target=_download_one_worker, args=(idx, args.save_dir, args.start, args.end, queue))
-        proc.start()
-        proc.join(args.task_timeout)
-
-        if proc.is_alive():
-            proc.terminate()
-            proc.join()
+        done += 1
+        try:
+            _, rows = download_one(idx, args.save_dir, args.start, args.end)
+            print(f"  进度 [{done}/{total}]  {idx} ✓  rows={rows}", flush=True)
+        except Exception as exc:
             failed.append(idx)
-            print(f"[error] {idx}: timeout after {args.task_timeout}s")
-            continue
+            print(f"  进度 [{done}/{total}]  {idx} ✗  {exc}", flush=True)
+        if done < total and args.delay > 0:
+            time.sleep(args.delay)
 
-        if queue.empty():
-            if proc.exitcode != 0:
-                failed.append(idx)
-                print(f"[error] {idx}: process exited with code {proc.exitcode}")
-            continue
-
-        ok, msg = queue.get()
-        if not ok:
-            failed.append(idx)
-            print(f"[error] {idx}: {msg}")
-
-    print(f"done. success={len(indexes) - len(failed)}, failed={len(failed)}")
+    status = "success" if not failed else f"success={total-len(failed)}, failed={len(failed)}"
+    print(f"done. {status}", flush=True)
     if failed:
         print("failed indexes:", ",".join(failed))
+        import sys
+        sys.exit(1)
 
 
 if __name__ == "__main__":

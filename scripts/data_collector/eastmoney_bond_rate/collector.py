@@ -190,6 +190,13 @@ class BondRateCollector:
             return
 
         filepath = self.save_dir / "cn_bond_yield.csv"
+
+        # 追加模式：合并已有数据
+        if filepath.exists():
+            existing = pd.read_csv(filepath)
+            df = pd.concat([existing, df], ignore_index=True)
+            df = df.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+
         df.to_csv(filepath, index=False)
 
         logger.info(

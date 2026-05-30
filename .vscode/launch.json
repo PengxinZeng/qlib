@@ -19,11 +19,12 @@
             "request": "launch",
             "program": "qlib/cli/run.py",
             "args": [
-                "examples/benchmarks/HistRelaPB/workflow_config.yaml"
+                "examples/benchmarks/MACDSignal/workflow_config.yaml"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
-            "justMyCode": false 
+            "justMyCode": false,
+            "subProcess": false,
         },
     ]
 }

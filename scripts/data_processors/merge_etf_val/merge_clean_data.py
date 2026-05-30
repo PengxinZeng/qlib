@@ -115,9 +115,10 @@ def merge_and_clean(fund_code: str, index_file: str, bond_df: pd.DataFrame) -> p
     for col in VALUATION_COLS:
         result[col] = merged[col] if col in merged.columns else pd.NA
 
-    # 左连接国债收益率（精确匹配日期）
+    # 左连接国债收益率（精确匹配日期），缺失日用最近交易日数据前向填充
     bond_cols = [c for c in bond_df.columns if c != "date"]
     result = result.merge(bond_df[["date"] + bond_cols], on="date", how="left")
+    result[bond_cols] = result[bond_cols].ffill()
 
     # 数据来源标记：0=hfq, 1=raw, -1=无基金数据
     if "hfq_close" in merged.columns:

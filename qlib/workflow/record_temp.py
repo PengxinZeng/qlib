@@ -546,6 +546,15 @@ class PortAnaRecord(ACRecordTemp):
                     analysis_df = indicator_analysis(indicators_normal)
                 else:
                     analysis_df = indicator_analysis(indicators_normal, method=self.indicator_analysis_method)
+                # append turnover metrics from report_normal
+                if _analysis_freq in portfolio_metric_dict:
+                    report_normal, _ = portfolio_metric_dict.get(_analysis_freq)
+                    avg_turnover_rate = report_normal["turnover"].mean()
+                    rebalance_day_ratio = (report_normal["turnover"] != 0).sum() / len(report_normal)
+                    extra_metrics = pd.DataFrame(
+                        {"value": {"avg_turnover_rate": avg_turnover_rate, "rebalance_day_ratio": rebalance_day_ratio}}
+                    )
+                    analysis_df = pd.concat([analysis_df, extra_metrics])
                 # log metrics
                 analysis_dict = analysis_df["value"].to_dict()
                 self.recorder.log_metrics(**{f"{_analysis_freq}.{k}": v for k, v in analysis_dict.items()})
@@ -756,6 +765,16 @@ class ReportRecord(RecordTemp):
             save_path = os.path.join(save_root, f"{csv_type}.csv")
             csv_data.to_csv(save_path, index=True)
             logger.info(f"Save {csv_type} to local file: {save_path}")
+
+        # indicator analysis metrics CSV: computed from already-loaded report_normal_df, no extra pkl reads
+        avg_turnover_rate = report_normal_df["turnover"].mean()
+        rebalance_day_ratio = (report_normal_df["turnover"] != 0).sum() / len(report_normal_df)
+        indicator_analysis_df = pd.DataFrame(
+            {"value": {"avg_turnover_rate": avg_turnover_rate, "rebalance_day_ratio": rebalance_day_ratio}}
+        )
+        indicator_analysis_csv_path = os.path.join(save_root, "indicator_analysis_df.csv")
+        indicator_analysis_df.to_csv(indicator_analysis_csv_path, index=True)
+        logger.info(f"Save indicator_analysis_df to local file: {indicator_analysis_csv_path}")
 
         # 每日持仓明细 CSV: 每行为一天，每列为一只股票/cash 的当日持仓总价值，最后一列 account_value
         positions_rows = {}

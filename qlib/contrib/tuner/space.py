@@ -35,6 +35,15 @@ HistRelaPBModelSpace = {
 }
 
 EvenWeightStrategySpace = {
-    "risk_degree": 0.95,       # 固定值，不参与搜索
+    "risk_degree": 1.0,       # 固定值，不参与搜索
     "max_stock_weight": 1.0,
+}
+
+MACDSignalModelSpace = {
+    # 快线 EMA 周期 [5, 20]，步长 1
+    "fast": hp.quniform("macd_fast", 5, 20, 1),
+    # 慢线 EMA 周期 [20, 60]，步长 1（搜索时须满足 fast < slow，由 model 内部处理）
+    "slow": hp.quniform("macd_slow", 20, 60, 1),
+    # 信号线 EMA 周期 [5, 15]，步长 1
+    "signal": hp.quniform("macd_signal", 5, 15, 1),
 }

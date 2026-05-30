@@ -10,6 +10,7 @@ import json
 import copy
 import pickle
 import logging
+import datetime
 import importlib
 import subprocess
 import pandas as pd
@@ -92,10 +93,31 @@ class Tuner:
             pickle.dump(trials, fp)
         self.logger.info("Trials saved to: {}".format(trials_path))
 
+    def _inject_to_trials(self, trials, params, result):
+        """将手动运行的参数和结果注入 Trials，供 TPE 作为先验观测（默认空实现）。"""
+        pass
+
     def tune(self):
         TimeInspector.set_time_mark()
         trials = self._load_trials()
         n_done = len(trials.trials)
+
+        # 运行人工指定的初始参数（仅在全新开始时执行，续跑时跳过）
+        initial_params_list = self.tuner_config.get("initial_params", [])
+        if initial_params_list and n_done == 0:
+            self.logger.info(
+                "Running {} manually specified initial params before TPE...".format(len(initial_params_list))
+            )
+            for idx, init_params in enumerate(initial_params_list):
+                self.logger.info(
+                    "[{}/{}] Initial param: {}".format(idx + 1, len(initial_params_list), init_params)
+                )
+                result = self.objective(init_params)
+                self._inject_to_trials(trials, init_params, result)
+            # 立即持久化，保证 Trials 与 search_history.csv 一致
+            self._save_trials(trials)
+            n_done = len(trials.trials)
+
         total_evals = n_done + self.max_evals
         fmin(
             fn=self.objective,
@@ -142,6 +164,68 @@ class WorkflowConfigTuner(Tuner):
     WORKFLOW_CONFIG_NAME = "workflow_config_{}.yaml"
     LOCAL_BEST_PARAMS_NAME = "local_best_params.json"
     LOCAL_HIST_NAME = "search_history.csv"
+
+    def _inject_to_trials(self, trials, params, result):
+        """
+        将手动运行的参数和结果注入 Trials，供 TPE 作为先验观测。
+        通过递归遍历 pyll 表达式树，提取 hp 内部参数名与用户参数 key 的映射。
+        """
+        from hyperopt.base import JOB_STATE_DONE
+        from hyperopt.pyll.base import Apply
+
+        # 递归提取 hp 参数名 → (group_name, user_key)
+        hp_mapping = {}
+
+        def find_hp_nodes(node, group_name, user_key):
+            if not isinstance(node, Apply):
+                return
+            if node.name == 'hyperopt_param':
+                hp_name = node.pos_args[0]._obj
+                hp_mapping[hp_name] = (group_name, user_key)
+                return
+            for arg in node.pos_args:
+                find_hp_nodes(arg, group_name, user_key)
+            for _, v in node.named_args:
+                find_hp_nodes(v, group_name, user_key)
+
+        for group_name, group_space in self.space.items():
+            if isinstance(group_space, dict):
+                for user_key, val in group_space.items():
+                    if isinstance(val, Apply):
+                        find_hp_nodes(val, group_name, user_key)
+
+        if not hp_mapping:
+            return  # 无 hp 参数（全固定值），跳过注入
+
+        # 构建 idxs / vals
+        tid = len(trials.trials)
+        idxs, vals = {}, {}
+        for hp_name, (group_name, user_key) in hp_mapping.items():
+            group_params = params.get(group_name, {})
+            if isinstance(group_params, dict) and user_key in group_params:
+                idxs[hp_name] = [tid]
+                vals[hp_name] = [float(group_params[user_key])]
+
+        trial_doc = {
+            'tid': tid,
+            'state': JOB_STATE_DONE,
+            'result': result,
+            'misc': {
+                'tid': tid,
+                'cmd': ('domain_attachment', 'FMinIter_Domain'),
+                'workdir': None,
+                'idxs': idxs,
+                'vals': vals,
+            },
+            'spec': None,
+            'owner': None,
+            'book_time': datetime.datetime.now(),
+            'refresh_time': datetime.datetime.now(),
+            'exp_key': None,
+        }
+        trials.insert_trial_docs([trial_doc])
+        trials.refresh()
+        self.logger.info("Injected initial trial (tid={}) into Trials for TPE prior.".format(tid))
 
     def setup_space(self):
         space = {}

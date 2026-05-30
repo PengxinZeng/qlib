@@ -29,10 +29,11 @@
 
 ## 2. 方法与指标
 
-| 方法 | Train+Valid<br>Annualized Return | Train+Valid<br>Information Ratio | Train+Valid<br>Max Drawdown | Test<br>Annualized Return | Test<br>Information Ratio | Test<br>Max Drawdown |
-|------|----------------------------------|----------------------------------|----------------------------|--------------------------|--------------------------|---------------------|
-| Benchmark (510050) | 0.093 | 0.351 | -0.703 | 0.015 | 0.101 | -0.365 |
-| HistRelaPB | 0.140 | 0.857 | -0.337 | 0.086 | 0.554 | -0.232 |
+| 方法 | Train+Valid<br>Annualized Return | Train+Valid<br>Information Ratio | Train+Valid<br>Max Drawdown | Test<br>Annualized Return | Test<br>Information Ratio | Test<br>Max Drawdown | Avg Turnover Rate | Rebalance Day Ratio |
+|------|----------------------------------|----------------------------------|----------------------------|--------------------------|--------------------------|---------------------|-------------------|---------------------|
+| Benchmark (510050) | 0.093 | 0.351 | -0.703 | 0.015 | 0.101 | -0.365 | - | - |
+| MACD | 0.150 | 0.669 | -0.519 | 0.014 | 0.090 | -0.393 | 0.359 | 0.486 |
+| HistRelaPB | 0.140 | 0.857 | -0.337 | 0.086 | 0.554 | -0.232 | 0.010 | 0.014 |
 
 ---
 
@@ -45,4 +46,6 @@
 - **Annualized Return (年化收益率)**: 策略的年化收益率
 - **Information Ratio (信息比率)**: 收益与波动的比值，衡量风险调整后的收益能力
 - **Max Drawdown (最大回撤)**: 策略从峰值到谷底的最大跌幅
+- **Avg Turnover Rate (平均换手率)**: 每次调仓时持仓变动的平均比例，反映交易频繁程度；值越小表示每次调仓改动越少
+- **Rebalance Day Ratio (调仓日比率)**: 实际发生调仓的交易日占总交易日的比例；值越小表示调仓越不频繁
 

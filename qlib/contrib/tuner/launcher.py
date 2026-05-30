@@ -20,7 +20,7 @@ args_parser.add_argument(
     "--config_path",
     required=False,
     type=str,
-    default='/Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/HistRelaPB/tuner_config.yaml',
+    default='examples/benchmarks/MACDSignal/tuner_config.yaml',
     help="config path indicates where to load yaml config.",
 )
 

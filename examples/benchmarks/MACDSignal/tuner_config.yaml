@@ -1,0 +1,47 @@
+experiment:
+    name: macd_signal_tuner
+    dir: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/MACDSignal/tuner_results
+    tuner_class: WorkflowConfigTuner
+    tuner_module_path: qlib.contrib.tuner.tuner
+
+optimization_criteria:
+    report_type: return_with_cost
+    report_factor: annualized_return
+    optim_type: max
+
+tuner_pipeline:
+  - workflow_config_path: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/MACDSignal/workflow_config.yaml
+    workflow_experiment_name: macd_signal_etf
+    analysis_freq: 1day
+    model:
+        space: MACDSignalModelSpace
+    strategy:
+        space: EvenWeightStrategySpace
+    trainer: {}
+    max_evals: 4
+    # 人工指定的初始参数组，在 TPE 搜索前依次执行，结果作为先验注入 Trials
+    # 格式与 objective 参数一致：model_space / strategy_space 嵌套用户字段名
+    # 仅在全新开始时执行（n_done == 0），续跑时自动跳过
+    # 若只想跑这几组而不做 TPE 搜索，将 max_evals 设为 0
+    initial_params:
+      - model_space:
+          fast: 12
+          slow: 37
+          signal: 6
+      - model_space:
+          fast: 10
+          slow: 37
+          signal: 6
+      - model_space:
+          fast: 11
+          slow: 38
+          signal: 6
+      - model_space:
+          fast: 11
+          slow: 36
+          signal: 6
+
+time_period: {}
+data: {}
+backtest: {}
+qlib_client: {}
