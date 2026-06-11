@@ -872,6 +872,147 @@ class ReportRecord(RecordTemp):
         return []
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数
+# ---------------------------------------------------------------------------
+
+def _fill_score_background(ax, dates, score_s, alpha: float = 0.12) -> None:
+    """在 ax 上按 score 值填充背景色（+1=绿，-1=红）"""
+    dates_arr = np.array(dates)
+    score_arr = score_s.reindex(dates).fillna(0).values
+    i = 0
+    while i < len(dates_arr):
+        s = score_arr[i]
+        if s == 0:
+            i += 1
+            continue
+        color = "#4CAF50" if s > 0 else "#F44336"
+        j = i + 1
+        while j < len(dates_arr) and score_arr[j] == s:
+            j += 1
+        ax.axvspan(dates_arr[i], dates_arr[j - 1], color=color, alpha=alpha)
+        i = j
+
+
+class MACDSignalChartRecord(ACRecordTemp):
+    """
+    MACD 信号概览图 Record
+
+    将所有股票汇聚到一张大图中，每只股票占一个子图组：
+      - 上方子图：收盘价折线 + score 背景着色（+1=绿，-1=红）
+      - 下方子图：DIF/DEA 折线 + Histogram 柱状图
+
+    生成文件：macd_signal_chart/macd_overview.png
+    """
+
+    artifact_path = "macd_signal_chart"
+    depend_cls = SignalRecord
+
+    def __init__(self, recorder, dataset=None, skip_existing=False):
+        super().__init__(recorder=recorder, skip_existing=skip_existing)
+        self.dataset = dataset
+
+    def _generate(self, **kwargs):
+        rcParams["font.sans-serif"] = ["Arial Unicode MS", "SimHei", "DejaVu Sans"]
+        rcParams["axes.unicode_minus"] = False
+
+        pred_df = self.load("pred.pkl")
+        if pred_df.empty:
+            logger.warning("MACDSignalChartRecord: pred.pkl is empty, skip.")
+            return {}
+
+        # 从 dataset 加载收盘价（test segment）
+        close_wide: pd.DataFrame | None = None
+        if self.dataset is not None:
+            try:
+                feat = self.dataset.prepare("test", col_set="feature", data_key=DataHandlerLP.DK_I)
+                if "close" in feat.columns:
+                    close_wide = feat["close"].unstack(level="instrument")
+            except Exception as e:
+                logger.warning(f"MACDSignalChartRecord: Failed to load close prices: {e}")
+
+        instruments = sorted(pred_df.index.get_level_values("instrument").unique())
+        n = len(instruments)
+        if n == 0:
+            logger.warning("MACDSignalChartRecord: no instruments found.")
+            return {}
+
+        # 布局：每行最多 ncols 只股票，每只股票占 2 行（价格 + MACD）
+        ncols = min(4, n)
+        n_inst_rows = (n + ncols - 1) // ncols
+        nrows = n_inst_rows * 2
+
+        fig_w = max(5 * ncols, 12)
+        fig_h = max(3 * nrows, 8)
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(fig_w, fig_h), squeeze=False)
+        fig.suptitle("MACD 信号总览（收盘价 & DIF/DEA/Histogram）", fontsize=13)
+
+        for i, inst in enumerate(instruments):
+            inst_row = i // ncols
+            col = i % ncols
+            ax_p = axes[inst_row * 2][col]       # 收盘价子图
+            ax_m = axes[inst_row * 2 + 1][col]   # MACD 子图
+
+            ax_p.sharex(ax_m)
+
+            inst_pred = pred_df.xs(inst, level="instrument")
+            dates = inst_pred.index
+
+            # --- 收盘价 ---
+            if close_wide is not None and inst in close_wide.columns:
+                close_s = close_wide[inst].reindex(dates)
+                ax_p.plot(dates, close_s, color="#2196F3", linewidth=1)
+
+            # --- score 背景着色 ---
+            if "score" in inst_pred.columns:
+                _fill_score_background(ax_p, dates, inst_pred["score"])
+
+            ax_p.set_title(inst.replace("_CLEAN", ""), fontsize=8, pad=2)
+            ax_p.set_ylabel("Close", fontsize=6)
+            ax_p.tick_params(labelsize=5)
+            ax_p.xaxis.set_major_formatter(mdates.DateFormatter("%y-%m"))
+            ax_p.xaxis.set_major_locator(mdates.AutoDateLocator())
+            plt.setp(ax_p.xaxis.get_majorticklabels(), rotation=45, ha="right", fontsize=4)
+
+            # --- MACD (DIF / DEA / Histogram) ---
+            if "histogram" in inst_pred.columns:
+                hist = inst_pred["histogram"]
+                bar_colors = ["#4CAF50" if v >= 0 else "#F44336" for v in hist]
+                ax_m.bar(dates, hist, color=bar_colors, alpha=0.6, width=1.5)
+            if "dif" in inst_pred.columns:
+                ax_m.plot(dates, inst_pred["dif"], color="#2196F3", linewidth=0.8, label="DIF")
+            if "dea" in inst_pred.columns:
+                ax_m.plot(dates, inst_pred["dea"], color="#FF9800", linewidth=0.8, label="DEA")
+
+            ax_m.axhline(0, color="black", linewidth=0.4, alpha=0.5)
+            ax_m.set_ylabel("MACD", fontsize=6)
+            ax_m.tick_params(labelsize=5)
+            ax_m.xaxis.set_major_formatter(mdates.DateFormatter("%y-%m"))
+            ax_m.xaxis.set_major_locator(mdates.AutoDateLocator())
+            plt.setp(ax_m.xaxis.get_majorticklabels(), rotation=45, ha="right", fontsize=4)
+            if i == 0:
+                ax_m.legend(fontsize=5, loc="upper left")
+
+        # 隐藏多余子图
+        for i in range(n, n_inst_rows * ncols):
+            inst_row = i // ncols
+            col = i % ncols
+            axes[inst_row * 2][col].set_visible(False)
+            axes[inst_row * 2 + 1][col].set_visible(False)
+
+        plt.tight_layout()
+
+        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        save_root = os.path.join(artifact_uri, self.artifact_path)
+        os.makedirs(save_root, exist_ok=True)
+        save_path = os.path.join(save_root, "macd_overview.png")
+        fig.savefig(save_path, dpi=120, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"MACDSignalChartRecord: saved overview chart → {save_path}")
+        return {}
+
+    def list(self):
+        return []
 class SignalDetailRecord(ACRecordTemp):
     """
     信号详细分析Record类，按股票保存每日信号详情到CSV文件

@@ -230,44 +230,44 @@ def _latest_signals_csv(cfg: Config) -> Path | None:
 
 
 def detect_signal(cfg: Config) -> dict:
-    """对比最近两个交易日的 score，识别调仓信号（以 score 变化为准）"""
-    sig_path = _latest_signals_csv(cfg)
-    if sig_path is None:
-        return {"action": "unknown", "changes": [], "reason": "未找到信号文件"}
+    """对比最近两个交易日的持仓，识别调仓信号（以持仓数据变化为准）"""
+    pos_path = _latest_signals_csv(cfg).parent.parent / "analysis_csvs" / "positions_daily.csv"
+    if not pos_path.exists():
+        return {"action": "unknown", "changes": [], "reason": "未找到持仓文件"}
 
-    df = pd.read_csv(sig_path, parse_dates=["datetime"])
-    df = df.sort_values("datetime")
-    dates = df["datetime"].unique()
-    if len(dates) < 2:
-        return {"action": "unknown", "changes": [], "reason": "信号数据不足两日"}
+    pos_df = pd.read_csv(pos_path, index_col=0, parse_dates=True)
+    # 移除统计行
+    pos_df = pos_df[pos_df.index != "total_holding_ratio"]
+    
+    if len(pos_df) < 2:
+        return {"action": "unknown", "changes": [], "reason": "持仓数据不足两日"}
 
-    # 只看有效 PB 的最近两日（排除 pb 全 NaN 的日期）
-    valid_dates = []
-    for d in reversed(sorted(dates)):
-        day_df = df[df["datetime"] == d]
-        if day_df["current_pb"].notna().any():
-            valid_dates.append(d)
-        if len(valid_dates) == 2:
-            break
+    # 获取最近两个交易日（排除空行）
+    valid_rows = pos_df.dropna(how="all")
+    if len(valid_rows) < 2:
+        return {"action": "hold", "changes": [], "reason": "有效持仓数据不足两日"}
 
-    if len(valid_dates) < 2:
-        return {"action": "hold", "changes": [], "reason": "近期 PB 数据缺失，无有效信号"}
+    prev_date = valid_rows.index[-2]
+    curr_date = valid_rows.index[-1]
+    prev_pos = valid_rows.iloc[-2]
+    curr_pos = valid_rows.iloc[-1]
 
-    d2, d1 = valid_dates[0], valid_dates[1]
-    prev = df[df["datetime"] == d1].set_index("instrument")["score"]
-    curr = df[df["datetime"] == d2].set_index("instrument")["score"]
-
+    # ETF 列（排除 account_value 和 cash）
+    etf_cols = [c for c in prev_pos.index if c not in ["account_value", "cash"]]
+    
     changes = []
-    all_symbols = set(prev.index) | set(curr.index)
-    for sym in all_symbols:
-        s1 = prev.get(sym, 0)
-        s2 = curr.get(sym, 0)
-        if s1 != s2:
-            changes.append({"symbol": sym, "prev_score": s1, "curr_score": s2})
+    for col in etf_cols:
+        v1 = prev_pos.get(col, 0)
+        v2 = curr_pos.get(col, 0)
+        # 处理 NaN
+        v1 = v1 if pd.notna(v1) else 0
+        v2 = v2 if pd.notna(v2) else 0
+        if v1 != v2:
+            changes.append({"symbol": col, "prev_pos": v1, "curr_pos": v2})
 
     action = "rebalance" if changes else "hold"
     return {"action": action, "changes": changes,
-            "prev_date": str(d1)[:10], "curr_date": str(d2)[:10]}
+            "prev_date": str(prev_date)[:10], "curr_date": str(curr_date)[:10]}
 
 
 def notify_macos(title: str, message: str) -> None:
@@ -288,7 +288,7 @@ class SignalNotifyStep(UpdateStep):
             detail_lines = []
             for c in changes:
                 sym = c["symbol"].replace("_CLEAN", "")
-                direction = "↑买入" if c["curr_score"] > c["prev_score"] else "↓卖出"
+                direction = "↑买入" if c["curr_pos"] > c["prev_pos"] else "↓卖出"
                 detail_lines.append(f"{sym} {direction}")
             detail = "、".join(detail_lines[:5])
             if len(changes) > 5:

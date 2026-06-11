@@ -102,3 +102,8 @@ task:
         #   kwargs:
         #     dataset: <DATASET>
         #     freq: "1day"
+
+        # - class: MACDSignalChartRecord
+        #   module_path: qlib.workflow.record_temp
+        #   kwargs:
+        #     dataset: <DATASET>

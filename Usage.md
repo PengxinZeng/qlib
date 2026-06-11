@@ -85,7 +85,7 @@ ls mlruns/<experiment_id>/<recorder_id>/artifacts/
 # 代码
 ```
 git add .
-git commit -m "add MACD, add daily_update"
+git commit -m "add 纳指、伯克希尔"
 git push origin main
 ```
 
