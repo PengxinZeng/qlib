@@ -229,11 +229,20 @@ def _latest_signals_csv(cfg: Config) -> Path | None:
     return max(candidates)[1] if candidates else None
 
 
+def latest_experiment_result_dir(cfg: Config) -> Path | None:
+    signals_csv = _latest_signals_csv(cfg)
+    return signals_csv.parent.parent if signals_csv else None
+
+
 def detect_signal(cfg: Config) -> dict:
     """对比最近两个交易日的持仓，识别调仓信号（以持仓数据变化为准）"""
-    pos_path = _latest_signals_csv(cfg).parent.parent / "analysis_csvs" / "positions_daily.csv"
+    result_dir = latest_experiment_result_dir(cfg)
+    if result_dir is None:
+        return {"action": "unknown", "changes": [], "reason": "未找到实验结果目录"}
+
+    pos_path = result_dir / "analysis_csvs" / "positions_daily.csv"
     if not pos_path.exists():
-        return {"action": "unknown", "changes": [], "reason": "未找到持仓文件"}
+        return {"action": "unknown", "changes": [], "reason": "未找到持仓文件", "result_dir": str(result_dir)}
 
     pos_df = pd.read_csv(pos_path, index_col=0, parse_dates=True)
     # 移除统计行
@@ -267,7 +276,8 @@ def detect_signal(cfg: Config) -> dict:
 
     action = "rebalance" if changes else "hold"
     return {"action": action, "changes": changes,
-            "prev_date": str(prev_date)[:10], "curr_date": str(curr_date)[:10]}
+            "prev_date": str(prev_date)[:10], "curr_date": str(curr_date)[:10],
+            "result_dir": str(result_dir)}
 
 
 def notify_macos(title: str, message: str) -> None:
@@ -283,6 +293,10 @@ class SignalNotifyStep(UpdateStep):
         result = detect_signal(cfg)
         action = result.get("action", "unknown")
         changes = result.get("changes", [])
+        result_dir = result.get("result_dir")
+
+        if result_dir:
+            logging.info(f"  [实验结果] {result_dir}")
 
         if action == "rebalance":
             detail_lines = []

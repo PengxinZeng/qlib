@@ -85,15 +85,6 @@ ls mlruns/<experiment_id>/<recorder_id>/artifacts/
 # 代码
 ```
 git add .
-git commit -m "add 纳指、伯克希尔"
+git commit -m "add PPO"
 git push origin main
 ```
-
-# Prompts
-请帮我使用qlib/contrib/tuner/tuner.py，调优/Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/HistRelaPB/workflow_config.yaml里面的参数
-先使用较小迭代次数验证代码跑通
-
-注意：
-1. 环境：conda activate rdagent
-2. 尽量在复用原有代码，不要自己新写整个工作流程
-
