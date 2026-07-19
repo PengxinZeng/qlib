@@ -1,7 +1,13 @@
 """
-ETF归一化价格可视化 - 跟踪误差分析
+ETF 归一化价格可视化 - 跟踪误差分析
 
 展示基金后复权价格 vs 跟踪指数归一化曲线，以基金上市日为基准。
+
+输出图片（保存至 .../data_distribution/TrackingError/）：
+- {fund_code}_{fund_name}.png — 每只基金一张图（遍历 merged 下所有 *_clean.csv）：
+    基金后复权价格(close)与跟踪指数(index_close)均对齐到基金上市日归一化为 1.0，
+    叠加绘制以观察跟踪误差；含基准线(=1.0)、上市日竖线标注，
+    以及数据点数/上市日/首日价格信息框。
 
 环境要求: conda activate rdagent
 """

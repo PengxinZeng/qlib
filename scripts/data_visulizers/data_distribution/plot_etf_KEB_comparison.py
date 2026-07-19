@@ -1,6 +1,19 @@
 """
-按成立日期依次画出每条曲线，第i条曲线初始价格为第1条曲线当日价格
-第1条曲线初始价格为1
+ETF 基金走势可视化（对齐归一化 + 估值 K/E/B 线）
+
+按成立日期依次画出每条曲线：第 1 条曲线初始价格归一化为 1，
+第 i 条曲线初始价格对齐到第 1 条（最早成立基金）在该曲线首日的价格。
+
+输出图片（保存至 .../data_distribution/AllETF/）：
+1. all_etf_aligned.png            — 所有 ETF 归一化收盘价叠加在同一张图，
+                                    带 train/valid/test 数据集划分背景与分割线。
+2. all_etf_subplots.png           — 每只 ETF 一个子图的归一化收盘价走势，
+                                    带数据集划分标注。
+3. all_etf_subplots_with_pepb.png — 每只 ETF 三行子图：归一化收盘价 / PE_TTM / PB，
+                                    带数据集划分标注。
+4. all_etf_subplots_keb.png       — 每只 ETF 一个子图的 K/E/B 三线：
+                                    K 线=归一化收盘价，E 线=K/PE_TTM，B 线=K/PB
+                                    （E、B 线归一化到与 K 线相同均值以便对比）。
 """
 
 import numpy as np
@@ -12,6 +25,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 import qlib
 from qlib.data import D
+
+# 纯绘图函数复用自 plot_lib（无副作用），供本 CLI 与 pipeline 的 EtfVisualizer 共用
+from plot_lib import get_fund_display_name, plot_aligned_etf, plot_subplots_etf
 
 # 路径配置
 DATA_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond")
@@ -35,14 +51,6 @@ def load_fund_names():
     except Exception as e:
         print(f"加载基金名称失败: {e}")
     return fund_names
-
-
-def get_fund_display_name(inst, fund_names):
-    """获取基金的显示名称 (代码 + 名称)"""
-    # 从 inst like "510050_NORMED" 提取代码
-    code = inst.replace('_NORMED', '')
-    name = fund_names.get(code, code)
-    return f"{code} {name}"
 
 
 def load_all_etf_data(include_pe_pb=False):
@@ -72,211 +80,6 @@ def load_all_etf_data(include_pe_pb=False):
         df.columns = ['close']
 
     return df
-
-
-def plot_aligned_etf(df, output_path):
-    """
-    按对齐方式画所有ETF归一化走势
-    第1条曲线初始价格为1
-    第i条曲线初始价格为第1条曲线在第i条曲线首日的价格
-    """
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
-
-    # 数据集划分信息
-    split_info = {
-        'train': {'start': '2005-02-23', 'end': '2019-11-01', 'color': '#2ecc71', 'label': 'Train(50%)'},
-        'valid': {'start': '2019-11-04', 'end': '2021-03-26', 'color': '#3498db', 'label': 'Valid(10%)'},
-        'test_a1': {'start': '2021-03-29', 'end': '2023-10-09', 'color': '#e74c3c', 'label': 'Test A1(20%)'},
-        'test_a2': {'start': '2023-10-10', 'end': '2025-01-03', 'color': '#f39c12', 'label': 'Test A2(10%)'},
-        'test_b': {'start': '2025-01-06', 'end': '2026-04-09', 'color': '#9b59b6', 'label': 'Test B(10%)'},
-    }
-
-    # unstack: columns = (field, instrument)
-    df_wide = df.unstack(level='instrument')
-
-    # 按首日日期排序基金
-    first_valid_dates = {}
-    for col in df_wide.columns:
-        inst = col[1]
-        series = df_wide[col].dropna()
-        if len(series) > 0:
-            first_valid_dates[inst] = series.index[0]
-
-    sorted_instruments = sorted(first_valid_dates.keys(), key=lambda x: first_valid_dates[x])
-    print(f"按成立日期排序的基金: {sorted_instruments}")
-
-    # 以第1只基金(最早成立的)为基准
-    base_inst = sorted_instruments[0]
-    base_col = ('close', base_inst)
-    base_prices = df_wide[base_col].dropna()
-
-    fig, ax = plt.subplots(figsize=(20, 10))
-
-    colors = plt.cm.tab20(np.linspace(0, 1, min(len(sorted_instruments), 20)))
-
-    # 绘制数据集背景区域
-    for name, info in split_info.items():
-        start = pd.Timestamp(info['start'])
-        end = pd.Timestamp(info['end'])
-        ax.axvspan(start, end, alpha=0.15, color=info['color'], label=info['label'])
-
-    # 绘制分割线
-    split_dates = [
-        pd.Timestamp('2019-11-01'),  # train end
-        pd.Timestamp('2021-03-26'),  # valid end
-        pd.Timestamp('2023-10-09'),  # test_a1 end
-        pd.Timestamp('2025-01-03'),   # test_a2 end
-    ]
-    for date in split_dates:
-        ax.axvline(x=date, color='gray', linestyle='--', alpha=0.7, linewidth=1.5)
-
-    # 绘制基金曲线
-    for i, inst in enumerate(sorted_instruments):
-        color = colors[i % len(colors)]
-        col = ('close', inst)
-        series = df_wide[col].dropna()
-        inst_first_date = series.index[0]
-
-        if i == 0:
-            normalized = series / series.iloc[0]
-        else:
-            base_price_at_inst_first = base_prices.loc[inst_first_date]
-            normalized = series / series.iloc[0] * base_price_at_inst_first
-
-        ax.plot(normalized.index, normalized.values,
-                linewidth=1.2, alpha=0.85, color=color, label=inst)
-
-    ax.set_xlabel('日期', fontsize=12)
-    ax.set_ylabel('归一化价格', fontsize=12)
-    ax.set_title('所有ETF基金K线走势 (按首日对齐归一化) - 数据集划分', fontsize=14)
-
-    # 创建图例
-    handles, labels = ax.get_legend_handles_labels()
-    # 添加数据集图例
-    split_patches = [mpatches.Patch(color=info['color'], alpha=0.3, label=info['label'])
-                     for info in split_info.values()]
-    handles = handles + split_patches
-    labels = labels + [info['label'] for info in split_info.values()]
-
-    ax.legend(handles, labels, loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=8, ncol=1)
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
-
-    print(f"图表已保存: {output_path}")
-
-
-def plot_subplots_etf(df, output_path, fund_names=None):
-    """
-    按子图方式画所有ETF归一化走势，每个ETF一个子图
-    添加数据集划分标注
-    """
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
-
-    if fund_names is None:
-        fund_names = load_fund_names()
-
-    # 数据集划分信息
-    split_info = {
-        'train': {'start': '2005-02-23', 'end': '2017-01-03', 'color': '#2ecc71', 'label': 'Train(50%)'},
-        'valid': {'start': '2017-01-04', 'end': '2019-11-03', 'color': '#3498db', 'label': 'Valid(10%)'},
-        'test_a1': {'start': '2019-11-04', 'end': '2026-04-09', 'color': '#e74c3c', 'label': 'Test A1(20%)'},
-        # 'test_a2': {'start': '2023-10-10', 'end': '2025-01-03', 'color': '#f39c12', 'label': 'Test A2(10%)'},
-        # 'test_b': {'start': '2025-01-06', 'end': '2026-04-09', 'color': '#9b59b6', 'label': 'Test B(10%)'},
-    }
-
-    # unstack: columns = (field, instrument)
-    df_wide = df.unstack(level='instrument')
-
-    # 按首日日期排序基金
-    first_valid_dates = {}
-    for col in df_wide.columns:
-        inst = col[1]
-        series = df_wide[col].dropna()
-        if len(series) > 0:
-            first_valid_dates[inst] = series.index[0]
-
-    sorted_instruments = sorted(first_valid_dates.keys(), key=lambda x: first_valid_dates[x])
-
-    # 以第1只基金(最早成立的)为基准
-    base_inst = sorted_instruments[0]
-    base_col = ('close', base_inst)
-    base_prices = df_wide[base_col].dropna()
-
-    # 计算子图布局
-    n_instruments = len(sorted_instruments)
-    n_cols = 3
-    n_rows = (n_instruments + n_cols - 1) // n_cols
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 4 * n_rows))
-    axes = axes.flatten() if n_rows > 1 else [axes] if n_cols == 1 else axes.flatten()
-
-    colors = plt.cm.tab20(np.linspace(0, 1, min(len(sorted_instruments), 20)))
-
-    # 绘制分割线
-    split_dates = [
-        pd.Timestamp('2019-11-01'),  # train end
-        pd.Timestamp('2021-03-26'),  # valid end
-        pd.Timestamp('2023-10-09'),  # test_a1 end
-        pd.Timestamp('2025-01-03'),   # test_a2 end
-    ]
-
-    for i, inst in enumerate(sorted_instruments):
-        ax = axes[i]
-        color = colors[i % len(colors)]
-        col = ('close', inst)
-        series = df_wide[col].dropna()
-        inst_first_date = series.index[0]
-
-        if i == 0:
-            normalized = series / series.iloc[0]
-        else:
-            base_price_at_inst_first = base_prices.loc[inst_first_date]
-            normalized = series / series.iloc[0] * base_price_at_inst_first
-
-        # 绘制数据集背景区域
-        for name, info in split_info.items():
-            start = pd.Timestamp(info['start'])
-            end = pd.Timestamp(info['end'])
-            ax.axvspan(start, end, alpha=0.15, color=info['color'], label=info['label'])
-
-        # 绘制分割线
-        for date in split_dates:
-            ax.axvline(x=date, color='gray', linestyle='--', alpha=0.7, linewidth=1.5)
-
-        ax.plot(normalized.index, normalized.values, linewidth=1.2, alpha=0.85, color=color)
-        ax.set_title(get_fund_display_name(inst, fund_names), fontsize=10)
-        ax.grid(True, alpha=0.3)
-
-        # 只在左侧显示y轴标签
-        ax.set_ylabel('归一化价格', fontsize=8)
-
-    # 隐藏多余的子图
-    for j in range(n_instruments, len(axes)):
-        axes[j].set_visible(False)
-
-    # 创建数据集图例
-    split_patches = [mpatches.Patch(color=info['color'], alpha=0.3, label=info['label'])
-                     for info in split_info.values()]
-
-    fig.legend(handles=split_patches, labels=[info['label'] for info in split_info.values()],
-               loc='upper center', bbox_to_anchor=(0.5, 0.02), ncol=5, fontsize=9)
-
-    fig.suptitle('所有ETF基金K线走势 (子图模式) - 数据集划分', fontsize=14, y=1.02)
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
-
-    print(f"子图图表已保存: {output_path}")
 
 
 def plot_subplots_with_pepb(df, output_path, fund_names=None):

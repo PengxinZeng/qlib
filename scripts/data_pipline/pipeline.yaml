@@ -1,0 +1,194 @@
+# pipeline.yaml — 全天候投资模型数据收集配置
+
+version: "1.0"
+output_base: /Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data
+
+# YAML anchors：定义一次，各 pipeline 用 alias 引用
+defaults:
+  start: &start "2000-01-01"
+  force: &force true   # true = 忽略已有数据，全量重新下载
+
+# ── 阶段一：各数据源下载到 CSV ─────────────────────────────────────────
+pipelines:
+  # - name: cash_cn
+  #   type: TencentETFCollector
+  #   symbols:
+  #     - {code: "000198", name: "南方现金增利",   index: ""}
+  #     - {code: "003816", name: "华宝添益",       index: ""}
+  #   fq_type: hfq
+  #   start: *start
+  #   force: *force
+  #   output_dir: source/cash_cn
+
+  - name: bond_cn
+    type: EastmoneyFundCollector
+    symbols:
+      - {code: "018846", name: "华泰保兴6个月持有期债券A",       index: "主动管理-债券-混债"}
+      - {code: "002276", name: "中邮纯债恒利债券A",       index: "主动管理-债券-混债"}
+    start: *start
+    force: *force
+    output_dir: source/bond_cn # 债券
+
+  # - name: bond_cn_etf
+  #   type: TencentETFCollector
+  #   symbols:
+  #     - {code: "511800", name: "华安短债",       index: "H11007"}
+  #     - {code: "511010", name: "国开债ETF",      index: "H11008"}
+  #     - {code: "511090", name: "30年国债ETF",    index: "H11009"}
+  #     - {code: "159972", name: "活跃国债ETF",    index: "H11009"}
+  #     - {code: "511260", name: "十年国债ETF",    index: "H11008"}
+  #   fq_type: hfq
+  #   start: *start
+  #   force: *force
+  #   output_dir: source/bond_cn # 债券
+
+  - name: equity_cn
+    type: TencentETFCollector
+    symbols:
+      - {code: "510300", name: "沪深300ETF华泰",      index: "1B0300"}
+      - {code: "510310", name: "沪深300ETF易方达",      index: "1B0300"}
+      - {code: "510500", name: "中证500ETF南方",      index: "1B0905"}
+      - {code: "159922", name: "中证500ETF嘉实",      index: "1B0905"}
+      - {code: "512100", name: "中证1000ETF南方",      index: "1B0852"}
+      - {code: "159845", name: "中证1000ETF华夏",      index: "1B0852"}
+      - {code: "512890", name: "红利低波ETF华泰",      index: "H30269"}
+      - {code: "159920", name: "恒生ETF华夏",      index: "HSI"}
+      - {code: "513660", name: "恒生ETF华夏",      index: "HSI"}
+      # - {code: "510210", name: "上证指数ETF富国",      index: "1A0001"}
+      # - {code: "510760", name: "上证指数ETF国泰",      index: "1A0001"}
+      # - {code: "159903", name: "深成ETF南方",      index: "399001"}
+      # - {code: "159943", name: "深证成指ETF大成",      index: "399001"}
+      # - {code: "159915", name: "创业板ETF",       index: "399006"}
+      # - {code: "512880", name: "证券ETF",         index: "399975"}
+      # - {code: "515180", name: "红利低波ETF",     index: "000015"}
+    fq_type: hfq
+    start: *start
+    force: *force
+    output_dir: source/equity_cn # 股票
+
+  # 腾讯接口不提供 hfqday（后复权）数据的标的，改用不复权价格（fq_type 留空）; 需要check 收益率一致性
+  - name: equity_cn_unadj
+    type: TencentETFCollector
+    symbols:
+      - {code: "159201", name: "自由现金流ETF华夏",      index: "980092"}
+      - {code: "159222", name: "自由现金流ETF易方达",      index: "980092"}
+      # - {code: "563020", name: "红利低波ETF易方达",      index: "H30269"}  # 除权价低估收益
+      - {code: "513180", name: "恒生科技ETF华夏",      index: "HS2083"}
+      - {code: "513130", name: "恒生科技ETF华泰柏瑞",      index: "HS2083"}
+      - {code: "513010", name: "恒生科技ETF易方达",      index: "HS2083"}
+      - {code: "513300", name: "纳斯达克ETF华夏",      index: "NDX"}
+      - {code: "159501", name: "纳指ETF嘉实",      index: "NDX"}
+      - {code: "159696", name: "纳指ETF易方达",      index: "NDX"}
+    fq_type: ""
+    start: *start
+    force: *force
+    output_dir: source/equity_cn_unadj # 股票
+
+  - name: commodity_metal_etf
+    type: TencentETFCollector
+    symbols:
+      - {code: "518880", name: "黄金ETF华安",      index: "AU9999"}
+      - {code: "159937", name: "黄金ETF博时",      index: "AU9999"}
+      - {code: "159934", name: "黄金ETF易方达",      index: "AU9999"}
+    fq_type: hfq
+    start: *start
+    force: *force
+    output_dir: source/commodity_metal_etf # 大宗商品、贵金属ETF
+
+  # - name: equity_us
+  #   type: YahooCollector
+  #   symbols: ["QQQ", "SPY", "EEM", "GLD", "SLV", "USO", "TLT", "IEF"]
+  #   proxy: "http://127.0.0.1:7890"
+  #   start: *start
+  #   force: *force
+  #   output_dir: source/equity_us # 股票
+
+  # - name: commodity_metal
+  #   type: AkshareCollector
+  #   symbols:
+  #     - {code: "XAU", source: "futures_index_unsh_sina"}
+  #     - {code: "XAG", source: "futures_index_unsh_sina"}
+  #     - {code: "CL0", source: "futures_zh_daily_sina"}
+  #   start: *start
+  #   force: *force
+  #   output_dir: source/commodity_metal # 大宗商品、贵金属
+
+  # - name: macro_cn
+  #   type: MacroCollector
+  #   indicators:
+  #     - {name: "cn_bond_yield_10y", source: "eastmoney_bond_rate"}
+  #     - {name: "cn_cpi",            source: "akshare_macro_china_cpi"}
+  #     - {name: "cn_ppi",            source: "akshare_macro_china_ppi"}
+  #   start: *start
+  #   force: *force
+  #   output_dir: source/macro_cn
+
+# ── 阶段一.五：用人工统计数据校验下载结果 ──────────────────────────────
+  - name: sanity_check
+    type: SanityChecker
+    source_dirs:
+      - source/equity_cn
+      - source/equity_cn_unadj
+      - source/commodity_metal_etf
+    anno_file: /Users/zengpengxin/workspace/CodeBase/qlib/EtfCompare/eft_data.csv
+    tolerance: 1e-4
+    report_path: sanity_check/report.csv
+
+# ── 阶段二：合并各 CSV → merged CSV ──────────────────────────────────
+  - name: merge
+    type: AllWeatherMerger
+    source_dirs:
+      - source/cash_cn
+      - source/bond_cn
+      - source/equity_cn
+      - source/equity_cn_unadj
+      - source/equity_us
+      - source/commodity_metal
+      - source/commodity_metal_etf
+      - source/macro_cn
+    output_dir: merged
+
+# ── 阶段二.四：可交易性过滤 merged CSV → filtered CSV ─────────────────────
+#   以 volume 作代理：无成交量(NaN 或 <= min_value)的不可交易日，
+#   将 open/high/low/close/volume 全部置 NaN；volume 整列全 NaN 的标的(如场外基金)整体跳过。
+  - name: filter_tradability
+    type: TradabilityFilter
+    input_dir: merged
+    output_dir: filtered
+    field: volume
+    min_value: 0
+    skip_if_all_missing: true
+
+# ── 阶段二.五：尖刺清洗 filtered CSV → cleaned CSV ─────────────────────────
+  - name: clean_spikes
+    type: SpikeCleaner
+    input_dir: filtered
+    output_dir: cleaned
+    spike_threshold: 0.40
+
+# ── 阶段二.五五：数据集切分（按累计可交易量）────────────────────────────────
+#   close 非 NaN = 可交易；切分方案(集合名/比例)在此配置，ratio 之和须为 1.0
+  - name: split
+    type: DatasetSplitter
+    input_dir: cleaned
+    output_dir: dataset_split
+    splits:
+      - {name: train,   ratio: 0.25}
+      - {name: valid,   ratio: 0.25}
+      - {name: test, ratio: 0.25}
+      - {name: testB,  ratio: 0.25}
+
+# ── 阶段二.六：可视化 cleaned CSV → 归一化走势图 ─────────────────────────
+  - name: visualize
+    type: EtfVisualizer
+    input_dir: cleaned
+    output_dir: data_distribution/AllETF
+    split_file: dataset_split/split_by_cumsum.csv
+
+# ── 阶段三：dump cleaned CSV → Qlib 二进制格式 ───────────────────────────
+  - name: dump
+    type: QlibDumper
+    data_path: cleaned
+    qlib_dir: qlib_all_weather
+    freq: day
+    max_workers: 16

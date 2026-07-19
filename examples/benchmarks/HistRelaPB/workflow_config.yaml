@@ -14,15 +14,15 @@ benchmark: &benchmark "510050_CLEAN"
 # 时间参数配置
 time_config:
     data_start: &data_start "2005-02-23"
-    data_end: &data_end "2026-06-18"
+    data_end: &data_end "2026-07-17"
     train_start: &train_start "2005-02-23"
     train_end: &train_end "2017-01-03"
     valid_start: &valid_start "2017-01-04"
     valid_end: &valid_end "2019-10-08"
     # backtest_start: &backtest_start "2005-02-23"
-    # backtest_end: &backtest_end "2026-06-18"
+    # backtest_end: &backtest_end "2026-07-17"
     backtest_start: &backtest_start "2019-10-09"
-    backtest_end: &backtest_end "2026-06-18"
+    backtest_end: &backtest_end "2026-07-17"
 
 # 回测配置
 port_analysis_config: &port_analysis_config

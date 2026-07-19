@@ -1,5 +1,15 @@
 """
-统计qlib市场中每日可交易股票数量分布
+统计 qlib 市场中每日可交易股票数量分布
+
+数据来源：qlib 二进制目录（读 calendars/day.txt 与各 instrument 的 close.day.bin，
+close 非 NaN 即视为当日可交易）。
+
+输出内容（保存至 {QLIB_DIR}/data_distribution/）：
+1. tradeable_distribution.png — 每日可交易股票数量的时间序列折线图，
+                                左上角标注总交易日/平均/最大/最新可交易数量。
+2. yearly_distribution.png    — 按年聚合：折线为年平均可交易数量，
+                                阴影带为当年 min-max 范围。
+3. tradeable_stats.csv        — 每日统计明细：date, tradeable_count, year, month。
 """
 
 import numpy as np

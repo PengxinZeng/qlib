@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Recalculate annualized returns in eft_data.csv."""
-
 from __future__ import annotations
+"""
+python EtfCompare/recalculate_annualized.py
+"""
 
 import argparse
 import csv
@@ -99,4 +101,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    print((42/9)**(1/12) - 1)
     main()
+
