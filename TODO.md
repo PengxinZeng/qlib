@@ -61,6 +61,27 @@
 - 就业数据
 
 ## 数据脚本
+python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml
+
+# Model
+python -u examples/experiments/run_experiments.py
+python -u qlib/cli/run.py examples/benchmarks/MACDSignal/workflow_config_all_weather.yaml
+
+## Hand Craft
+- [x] ALL-均匀投资
+- [x] ALL-IN + Top-K选股
+- [x] MACD + Top-K选股
+- [ ] 均线作估值
+- [ ] MACD-周频月频
+- [ ] Oracle
+
+## Imitation Learning
+
+## Hand Craft 估值
+- [ ] Hist Rela PB
+
+## Reinforcement Learning
+- [ ] PPO GRPO
 
 -------
 

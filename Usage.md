@@ -85,6 +85,6 @@ ls mlruns/<experiment_id>/<recorder_id>/artifacts/
 # 代码
 ```
 git add .
-git commit -m "add All Weather data pipline"
+git commit -m "add All Weather EMVal"
 git push origin main
 ```

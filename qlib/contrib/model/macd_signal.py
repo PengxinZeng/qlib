@@ -51,7 +51,7 @@ class MACDSignalModel(Model):
         Returns
         -------
         pd.DataFrame
-            列：score, dif, dea, histogram
+            列：score, dif, dea, histogram, ema_fast, ema_slow
             索引为 (datetime, instrument)
         """
         # 解析 segment 的时间范围
@@ -89,7 +89,9 @@ class MACDSignalModel(Model):
                 score = np.zeros(n)
                 return pd.DataFrame(
                     {"score": score, "dif": dif, "dea": dea,
-                     "histogram": np.zeros(n)},
+                     "histogram": np.zeros(n),
+                     "ema_fast": np.full(n, np.nan),
+                     "ema_slow": np.full(n, np.nan)},
                     index=group.index,
                 )
 
@@ -110,7 +112,8 @@ class MACDSignalModel(Model):
 
             return pd.DataFrame(
                 {"score": score, "dif": dif_arr, "dea": dea_arr,
-                 "histogram": hist_arr},
+                 "histogram": hist_arr,
+                 "ema_fast": ema_fast, "ema_slow": ema_slow},
                 index=group.index,
             )
 
@@ -123,4 +126,4 @@ class MACDSignalModel(Model):
             dates = result.index.get_level_values("datetime")
             result = result[(dates >= seg_start) & (dates <= seg_end)]
 
-        return result[["score", "dif", "dea", "histogram"]]
+        return result[["score", "dif", "dea", "histogram", "ema_fast", "ema_slow"]]

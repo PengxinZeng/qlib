@@ -19,7 +19,7 @@
             "request": "launch",
             "program": "qlib/cli/run.py",
             "args": [
-                "examples/benchmarks/RLMultiStock/workflow_config.yaml"
+                "examples/benchmarks/EMVal/workflow_config_all_weather.yaml"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",

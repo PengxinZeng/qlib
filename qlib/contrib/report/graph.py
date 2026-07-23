@@ -118,9 +118,17 @@ class BaseGraph:
         :return:
         """
 
+        # Convert DatetimeIndex to string to avoid Kaleido JSON serialization error
+        # (pd.Timestamp is not JSON serializable with kaleido>=1.0.0)
+        x = self._df.index
+        if isinstance(x, pd.DatetimeIndex):
+            x = x.strftime("%Y-%m-%d").tolist()
+        elif hasattr(x, "dtype") and not isinstance(x, (list,)):
+            x = x.tolist()
+
         _data = [
             self.get_instance_with_graph_parameters(
-                graph_type=self._graph_type, x=self._df.index, y=self._df[_col], name=_name, **self._graph_kwargs
+                graph_type=self._graph_type, x=x, y=self._df[_col], name=_name, **self._graph_kwargs
             )
             for _col, _name in self._name_dict.items()
         ]
@@ -170,11 +178,19 @@ class HeatmapGraph(BaseGraph):
 
         :return:
         """
+        # Convert to string to avoid Kaleido JSON serialization error with pd.Timestamp
+        x = self._df.columns
+        y = self._df.index
+        if isinstance(x, pd.DatetimeIndex):
+            x = x.strftime("%Y-%m-%d").tolist()
+        if isinstance(y, pd.DatetimeIndex):
+            y = y.strftime("%Y-%m-%d").tolist()
+
         _data = [
             self.get_instance_with_graph_parameters(
                 graph_type=self._graph_type,
-                x=self._df.columns,
-                y=self._df.index,
+                x=x,
+                y=y,
                 z=self._df.values.tolist(),
                 **self._graph_kwargs,
             )
@@ -192,7 +208,10 @@ class HistogramGraph(BaseGraph):
         """
         _data = [
             self.get_instance_with_graph_parameters(
-                graph_type=self._graph_type, x=self._df[_col], name=_name, **self._graph_kwargs
+                graph_type=self._graph_type,
+                x=self._df[_col].tolist() if hasattr(self._df[_col], "values") else self._df[_col],
+                name=_name,
+                **self._graph_kwargs,
             )
             for _col, _name in self._name_dict.items()
         ]

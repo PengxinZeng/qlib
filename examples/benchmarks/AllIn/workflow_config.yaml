@@ -1,28 +1,26 @@
 qlib_init:
-    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond"
+    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_data_fix_hfq"
     region: cn
 
 # MLflow配置 - 指定实验结果保存位置
 mlflow_tracking_uri: "file:./mlruns"
 
 # 实验名称
-experiment_name: hist_rela_pb_etf
+experiment_name: topk_allin
 
 market: &market all
-benchmark: &benchmark "510050_CLEAN"
+benchmark: &benchmark "510300"
 
-# 时间参数配置
+# 时间参数配置 (train用于选股, valid预留, test用于回测)
 time_config:
-    data_start: &data_start "2005-02-23"
-    data_end: &data_end "2026-07-23"
-    train_start: &train_start "2005-02-23"
-    train_end: &train_end "2017-01-03"
-    valid_start: &valid_start "2017-01-04"
-    valid_end: &valid_end "2019-10-08"
-    # backtest_start: &backtest_start "2005-02-23"
-    # backtest_end: &backtest_end "2026-07-23"
-    backtest_start: &backtest_start "2019-10-09"
-    backtest_end: &backtest_end "2026-07-23"
+    data_start: &data_start "1991-01-29"
+    data_end: &data_end "2026-04-15"
+    train_start: &train_start "1991-01-29"
+    train_end: &train_end "2020-10-23"
+    valid_start: &valid_start "2020-10-26"
+    valid_end: &valid_end "2023-08-07"
+    backtest_start: &backtest_start "2023-08-08"
+    backtest_end: &backtest_end "2026-04-15"
 
 # 回测配置
 port_analysis_config: &port_analysis_config
@@ -44,21 +42,15 @@ port_analysis_config: &port_analysis_config
             open_cost: 0.0003
             close_cost: 0.0003
             min_cost: 5
-            trade_unit: 0.001
+            trade_unit: 100
 
 # 任务配置
 task:
     model:
-        class: HistRelaPBSignal
-        module_path: qlib.contrib.model.hist_rela_pb_signal
+        class: TopkAllInSignal
+        module_path: qlib.contrib.model.topk_allin_signal
         kwargs:
-            lookback_days: 982       # 历史回看窗口天数
-            min_valid_days_ratio: 0.45   # 最小有效数据天数 = int(lookback_days * ratio)
-            oversold_threshold: 0.04    # 超卖阈值（买入信号）
-            overbought_threshold: 0.76  # 超买阈值（卖出信号）
-            volume_threshold: 0.0       # 成交量阈值
-            spread_threshold: 5.0       # 股债利差阈值(%)：1/PE_TTM*100 - CN 2Y >= 5.9% 才触发买入
-            freq: "day"
+            top_k: 1
 
     dataset:
         class: DatasetH
@@ -73,29 +65,13 @@ task:
                     fit_start_time: *train_start
                     fit_end_time: *train_end
                     instruments: *market
-                    fields: 
-                        - "$open"
-                        - "$high"
-                        - "$low"
+                    fields:
                         - "$close"
                         - "$volume"
-                        - "$pb"
-                        - "$pb_median"
-                        - "$pe_ttm"
-                        - "$pe_ttm_median"
-                        - "$cn_2y"
                     field_names:
-                        - "open"
-                        - "high"
-                        - "low"
                         - "close"
                         - "volume"
-                        - "pb"
-                        - "pb_median"
-                        - "pe_ttm"
-                        - "pe_ttm_median"
-                        - "cn_2y"
-                    # 只使用ProcessInf处理无穷值
+                    # 保持原始值：仅处理无穷值，不做归一化（选股依赖真实收益）
                     infer_processors:
                         - class: ProcessInf
                           kwargs: {}
@@ -105,7 +81,7 @@ task:
             segments:
                 train: [*train_start, *train_end]
                 valid: [*valid_start, *valid_end]
-                test: [*backtest_start, *backtest_end]  # 临时调整为train+valid用于参数调优
+                test: [*backtest_start, *backtest_end]
 
     record:
         - class: SignalRecord

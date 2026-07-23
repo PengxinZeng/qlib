@@ -1,0 +1,32 @@
+# 实验评测配置（通用 runner 读取此文件）
+# runner 与具体方法解耦：这里只列出各方法的完整 qrun 配置路径 + 测试段(regime)。
+# 路径相对本文件所在目录解析。
+
+# 待评测的配置（可跨方法混排；每个都是完整可 qrun 的 workflow_config）
+configs:
+  - alias: equalweight
+    path: ../benchmarks/AllIn/workflow_config_all_weather_equalweight.yaml           # 等权全市场基准
+  - alias: allin_total_return
+    path: ../benchmarks/AllIn/workflow_config_all_weather.yaml                     # 复用现有(score_type=total_return)
+  - alias: allin_annualized
+    path: ../benchmarks/AllIn/workflow_config_all_weather_annualized.yaml
+  - alias: allin_information_ratio
+    path: ../benchmarks/AllIn/workflow_config_all_weather_information_ratio.yaml
+  - alias: macd
+    path: ../benchmarks/MACDSignal/workflow_config_all_weather.yaml                  # MACD 趋势择时
+
+# 测试段：fit 段沿用各配置自带的 train/valid(模型在 train 排序 + valid 选 K)，
+# runner 仅覆盖 test 段与回测窗口。A=test 段，B=testB 段。
+regimes:
+  Val:
+    test: ["2018-04-19", "2021-11-12"]
+  A:
+    test: ["2021-11-15", "2024-05-23"]
+  B:
+    test: ["2024-05-24", "2026-07-17"]
+
+# 输出目录(相对本文件)
+output_dir: results
+
+# 仅保留指标相关 record 以提速(去掉 SignalDetailRecord/ReportRecord)
+keep_records: ["SignalRecord", "PortAnaRecord"]

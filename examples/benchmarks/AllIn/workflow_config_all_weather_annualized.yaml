@@ -1,0 +1,106 @@
+qlib_init:
+    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data/qlib_all_weather"
+    region: cn
+
+# MLflow配置 - 指定实验结果保存位置
+mlflow_tracking_uri: "file:./mlruns"
+
+# 实验名称
+experiment_name: topk_allin_all_weather_annualized
+
+market: &market all
+benchmark: &benchmark "510300"
+
+# 时间参数配置（取自 all_weather_data/dataset_split/split_info.json）
+time_config:
+    data_start: &data_start "2012-05-28"
+    data_end: &data_end "2026-07-17"
+    train_start: &train_start "2012-05-28"
+    train_end: &train_end "2018-04-18"
+    valid_start: &valid_start "2018-04-19"
+    valid_end: &valid_end "2021-11-12"
+    backtest_start: &backtest_start "2021-11-15"
+    backtest_end: &backtest_end "2024-05-23"
+
+# 回测配置
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: EvenWeightStrategy
+        module_path: qlib.contrib.strategy.signal_strategy
+        kwargs:
+            signal: <PRED>
+            risk_degree: 1.0
+            max_stock_weight: 1.0
+    backtest:
+        start_time: *backtest_start
+        end_time: *backtest_end
+        account: 1000000
+        benchmark: *benchmark
+        exchange_kwargs:
+            limit_threshold: 0.10
+            deal_price: close
+            open_cost: 0.0003
+            close_cost: 0.0003
+            min_cost: 5
+            trade_unit: 0.0001
+
+# 任务配置
+task:
+    model:
+        class: TopkAllInSignal
+        module_path: qlib.contrib.model.topk_allin_signal
+        kwargs:
+            top_k: fit_val # fit_val or int
+            score_type: annualized   # total_return / annualized / information_ratio
+
+    dataset:
+        class: DatasetH
+        module_path: qlib.data.dataset
+        kwargs:
+            handler:
+                class: RawFieldsHandler
+                module_path: qlib.contrib.data.handler_raw_fields
+                kwargs:
+                    start_time: *data_start
+                    end_time: *data_end
+                    fit_start_time: *train_start
+                    fit_end_time: *train_end
+                    instruments: *market
+                    # all_weather_data 仅 dump 了 OHLCV 字段
+                    fields:
+                        - "$close"
+                        - "$volume"
+                    field_names:
+                        - "close"
+                        - "volume"
+                    # OHLCV 无 inf、MACD 自行处理 NaN，故不需要 processor
+                    infer_processors: []
+                    learn_processors: []
+            segments:
+                train: [*train_start, *train_end]
+                valid: [*valid_start, *valid_end]
+                test: [*backtest_start, *backtest_end]
+
+    record:
+        - class: SignalRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            model: <MODEL>
+            dataset: <DATASET>
+
+        - class: SignalDetailRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            skip_existing: False
+
+        - class: PortAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            config: *port_analysis_config
+
+        - class: ReportRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            dataset: <DATASET>
+            freq: "1day"
+            figure_timeout: 60   # 单张图导出超时(秒)，超时跳过避免 kaleido 卡死

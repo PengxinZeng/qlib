@@ -33,6 +33,7 @@ try:
 except ModuleNotFoundError:
     pytorch_classes = ()
 
+from .em_val import EMValModel
 from .hist_rela_pb_signal import HistRelaPBSignal
 from .macd_signal import MACDSignalModel
 

@@ -101,6 +101,9 @@ test = [
 ]
 analysis = [
   "plotly",
+  # kaleido 1.x(choreographer 驱动系统 Chrome) 在部分环境 write_image 会死锁；
+  # 固定 0.2.1(自带 Chromium) 以保证 ReportRecord 图片导出稳定。
+  "kaleido==0.2.1",
   "statsmodels",
 ]
 client = [
