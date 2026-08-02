@@ -207,7 +207,7 @@ class EMValModel(Model):
         signal_indices = np.where(signal_mask)[0]
         for t in signal_indices:
             direction = "BUY" if buy_cond[t] else "SELL"
-            logger.info(
+            logger.debug(
                 "[%s] stock=%-10s date=%s close=%-10.4f volume=%-12.2f "
                 "diff=%-10.6f over_val_pct=%-10.6f over_val_rank=%-7.4f "
                 "ema_fast=%-10.4f ema_mid=%-10.4f ema_slow=%-10.4f",

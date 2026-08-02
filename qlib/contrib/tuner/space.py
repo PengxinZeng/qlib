@@ -47,3 +47,24 @@ MACDSignalModelSpace = {
     # 信号线 EMA 周期 [5, 15]，步长 1
     "signal": hp.quniform("macd_signal", 5, 15, 1),
 }
+
+EMValModelSpace = {
+    # 快线 EMA 周期 [5, 30]，步长 1
+    "fast": 2, # hp.quniform("emval_fast", 2, 32, 1),
+    # 中线 EMA 周期 [10, 60]，步长 1
+    "mid": 4, # hp.quniform("emval_mid", 4, 64, 1),
+    # 慢线 EMA 周期（估值线）[128, 8192]，对数均匀分布
+    # qloguniform(low, high, q) = round(exp(uniform(low, high)) / q) * q
+    # low = ln(128) ≈ 4.8520, high = ln(8192) ≈ 9.0109
+    "slow": hp.qloguniform("emval_slow", 5.7, 9.010913347279293, 1),
+    # 滚动窗口长度 [200, 2000]，步长 1
+    "Nt": hp.quniform("emval_Nt", 200, 2400, 1),
+    # 趋势死区宽度：None（不启用趋势确认）或 [0.0, 0.10]，步长 0.005
+    "epsilon": None, # hp.choice("emval_epsilon", [None, hp.quniform("emval_epsilon_val", 0.0, 0.10, 0.005)]),
+    # 最小有效数据比例 [0.10, 1.0]，步长 0.05
+    "min_valid_days_ratio": 0.30, # hp.quniform("emval_min_valid_days_ratio", 0.10, 1.0, 0.05),
+    # 买入分位阈值 [0.01, 0.20]，步长 0.01
+    "buy_rank_thre": hp.quniform("emval_buy_rank_thre", 0.01, 0.20, 0.01),
+    # 卖出分位阈值 [0.50, 0.98]，步长 0.01
+    "sell_rank_thre": hp.quniform("emval_sell_rank_thre", 0.50, 0.99, 0.01),
+}

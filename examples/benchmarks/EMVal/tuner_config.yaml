@@ -1,0 +1,46 @@
+experiment:
+    name: em_val_tuner
+    dir: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMVal/tuner_results
+    tuner_class: WorkflowConfigTuner
+    tuner_module_path: qlib.contrib.tuner.tuner
+
+optimization_criteria:
+    report_type: return_with_cost
+    report_factor: annualized_return
+    optim_type: max
+
+tuner_pipeline:
+  - workflow_config_path: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml
+    workflow_experiment_name: em_val_all_weather
+    analysis_freq: 1day
+    model:
+        space: EMValModelSpace
+    strategy:
+        space: EvenWeightStrategySpace
+    trainer: {}
+    max_evals: 0
+    # 人工指定的初始参数组，在 TPE 搜索前依次执行，结果作为先验注入 Trials
+    # 格式与 objective 参数一致：model_space / strategy_space 嵌套用户字段名
+    # 支持续跑：已执行过的参数会自动跳过，新增的 initial_params 会继续执行
+    # 支持只指定部分字段：缺失字段将从 workflow_config_path 的 yaml 默认值中补全
+    # 若只想跑这几组而不做 TPE 搜索，将 max_evals 设为 0
+    initial_params:
+      - model_space:
+          min_valid_days_ratio: 0.35
+      - model_space:
+          min_valid_days_ratio: 0.40
+      - model_space:
+          min_valid_days_ratio: 0.50
+      - model_space:
+          min_valid_days_ratio: 0.25
+      - model_space:
+          min_valid_days_ratio: 0.20
+      - model_space:
+          min_valid_days_ratio: 0.10
+
+time_period: {}
+data: {}
+backtest: {}
+qlib_client: {}
+
+# nohup python -u qlib/contrib/tuner/launcher.py -c examples/benchmarks/EMVal/tuner_config.yaml > output/_tuner_config.log 2>&1 &

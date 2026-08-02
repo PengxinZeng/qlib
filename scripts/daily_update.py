@@ -136,12 +136,10 @@ class ETFKlineStep(UpdateStep):
 
 
 class IndexValuationStep(UpdateStep):
-    label = "更新指数估值"
+    label = "更新指数估值（全量）"
 
     def execute(self, cfg: Config) -> None:
         index_dir = cfg.etf_index_dir / "index_data"
-        dates = [d for f in index_dir.glob("*.csv") if (d := last_non_null_date(f)) is not None]
-        ak_start = min(dates).strftime("%Y-%m-%d") if dates else None
 
         extra: list[str] = []
         if cfg.symbols:
@@ -151,15 +149,13 @@ class IndexValuationStep(UpdateStep):
                 logging.warning(f"  {etf_list} 无对应指数，跳过")
                 return
             extra = ["--symbols", ",".join(idx_codes)]
-            logging.info(f"  indexes={idx_codes}, start={ak_start}")
+            logging.info(f"  indexes={idx_codes}")
         else:
-            logging.info(f"  全部指数, start={ak_start}")
+            logging.info("  全部指数（全量）")
 
         cmd = [PYTHON, "scripts/data_collector/akshare/collector_index.py",
                "--save_dir", str(index_dir),
                "--delay", "3"]
-        if ak_start:
-            cmd += ["--start", ak_start]
 
         attempt = 0
         retry_interval = 60  # 秒
@@ -181,15 +177,13 @@ class IndexValuationStep(UpdateStep):
 
 
 class BondRateStep(UpdateStep):
-    label = "更新国债收益率"
+    label = "更新国债收益率（全量）"
 
     def execute(self, cfg: Config) -> None:
-        ld = last_non_null_date(cfg.source_dir / "cn_bond_rate" / "cn_bond_yield.csv")
-        start = ld.strftime("%Y-%m-%d") if ld else "2000-01-01"
-        logging.info(f"  start={start}")
+        logging.info("  全量下载（start=2000-01-01）")
         run([PYTHON, "scripts/data_collector/eastmoney_bond_rate/collector.py", "download_bond_rate",
              "--source_dir", str(cfg.source_dir / "cn_bond_rate"),
-             "--start_date", start, "--delay", "0.5"], cfg)
+             "--start_date", "2000-01-01", "--delay", "0.5"], cfg)
 
 
 class MergeConvertStep(UpdateStep):

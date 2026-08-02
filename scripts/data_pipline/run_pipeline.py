@@ -3,13 +3,11 @@ run_pipeline.py — 全天候数据 Pipeline 执行入口
 
 用法：
     # 执行全部步骤
-    python run_pipeline.py
+    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml 
 
     # 只执行指定 type 的步骤（可多个）
-    python run_pipeline.py --only TencentETFCollector YahooCollector
+    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml  --only TencentETFCollector YahooCollector
 
-    # 使用指定配置文件
-    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml --only equity_cn
 """
 
 import sys

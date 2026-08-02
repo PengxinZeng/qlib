@@ -14,6 +14,10 @@ configs:
     path: ../benchmarks/AllIn/workflow_config_all_weather_information_ratio.yaml
   - alias: macd
     path: ../benchmarks/MACDSignal/workflow_config_all_weather.yaml                  # MACD 趋势择时
+  - alias: emVal_WoMom
+    path: ../benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml                      # EMVal 模型
+  - alias: emVal
+    path: ../benchmarks/EMVal/workflow_config_all_weather.yaml                      # EMVal 模型
 
 # 测试段：fit 段沿用各配置自带的 train/valid(模型在 train 排序 + valid 选 K)，
 # runner 仅覆盖 test 段与回测窗口。A=test 段，B=testB 段。

@@ -72,13 +72,31 @@ class Tuner:
             hist_df = pd.DataFrame()
             n_hist = 0
 
-        # 一致性校验
+        # 一致性校验：若不一致则以 Trials 为准，截断 search_history.csv
         if n_trials != n_hist:
-            raise RuntimeError(
-                "Trials ({} evals) and search_history.csv ({} rows) are inconsistent. "
-                "Please delete one or both to restart, or fix the mismatch manually.\n"
-                "  trials: {}\n  history: {}".format(n_trials, n_hist, trials_path, hist_path)
-            )
+            if n_trials > 0 and n_hist > n_trials:
+                n_hist_orig = n_hist
+                hist_df = hist_df.iloc[:n_trials]
+                n_hist = len(hist_df)
+                self.logger.warning(
+                    "search_history.csv has {} rows but Trials has {} evals. "
+                    "Truncated history to {} rows to match.".format(n_hist_orig, n_trials, n_trials)
+                )
+            elif n_trials == 0:
+                # Trials 为空，但 CSV 有旧数据 → 清空 CSV
+                n_hist_orig = n_hist
+                hist_df = pd.DataFrame()
+                n_hist = 0
+                self.logger.warning(
+                    "Trials is empty but search_history.csv had {} rows. "
+                    "Resetting history.".format(n_hist_orig)
+                )
+            else:
+                raise RuntimeError(
+                    "Trials ({} evals) and search_history.csv ({} rows) are inconsistent. "
+                    "Please delete one or both to restart, or fix the mismatch manually.\n"
+                    "  trials: {}\n  history: {}".format(n_trials, n_hist, trials_path, hist_path)
+                )
 
         if hasattr(self, "LOCAL_HIST_NAME"):
             self._hist_df = hist_df
@@ -93,6 +111,55 @@ class Tuner:
             pickle.dump(trials, fp)
         self.logger.info("Trials saved to: {}".format(trials_path))
 
+    def _params_in_trials(self, trials, params):
+        """检查一组参数是否已在 Trials 中存在（续跑去重用）。"""
+        if not trials.trials:
+            return False
+        # 将待检参数展平成 (short_name → float) 的字典（如 fast → 11.0）
+        params_flat = {}
+        for group_name, group_val in params.items():
+            if isinstance(group_val, dict):
+                for k, v in group_val.items():
+                    try:
+                        params_flat[k] = float(v) if v is not None else None
+                    except (ValueError, TypeError):
+                        params_flat[k] = None
+
+        for trial in trials.trials:
+            existing_params = trial.get("misc", {}).get("vals", {})
+            if not existing_params:
+                continue
+            # hyperopt hp 内部的参数名带前缀（如 emval_fast），提取短名做匹配
+            # 只比较两者共有的参数（Trials 仅含 hp 参数，不含固定值）
+            existing_short = {}
+            for hp_name, vals_list in existing_params.items():
+                parts = hp_name.split("_", 1)
+                short_name = parts[1] if len(parts) > 1 else parts[0]
+                existing_short[short_name] = vals_list[0] if vals_list else None
+
+            # 提取 params 中与 Trials 共有部分的参数值
+            common_keys = set(existing_short.keys()) & set(params_flat.keys())
+            if not common_keys:
+                continue
+            if len(common_keys) != len(existing_short):
+                # Trials 中有 params 中没有的 hp 参数，不匹配
+                continue
+
+            match = True
+            for short_name, val in existing_short.items():
+                pv = params_flat.get(short_name, None)
+                if val is None and pv is None:
+                    continue
+                if val is None or pv is None:
+                    match = False
+                    break
+                if abs(val - pv) > 1e-9:
+                    match = False
+                    break
+            if match:
+                return True
+        return False
+
     def _inject_to_trials(self, trials, params, result):
         """将手动运行的参数和结果注入 Trials，供 TPE 作为先验观测（默认空实现）。"""
         pass
@@ -102,21 +169,24 @@ class Tuner:
         trials = self._load_trials()
         n_done = len(trials.trials)
 
-        # 运行人工指定的初始参数（仅在全新开始时执行，续跑时跳过）
+        # 运行人工指定的初始参数（每次续跑都重新执行全部，暂不启用去重跳过）
         initial_params_list = self.tuner_config.get("initial_params", [])
-        if initial_params_list and n_done == 0:
-            self.logger.info(
-                "Running {} manually specified initial params before TPE...".format(len(initial_params_list))
-            )
-            for idx, init_params in enumerate(initial_params_list):
+        if initial_params_list:
+            # 直接使用 initial_params_list，不再调用 _fill_initial_params 填充
+            pending = list(initial_params_list)
+            if pending:
                 self.logger.info(
-                    "[{}/{}] Initial param: {}".format(idx + 1, len(initial_params_list), init_params)
+                    "Running {} manually specified initial params before TPE...".format(len(pending))
                 )
-                result = self.objective(init_params)
-                self._inject_to_trials(trials, init_params, result)
-            # 立即持久化，保证 Trials 与 search_history.csv 一致
-            self._save_trials(trials)
-            n_done = len(trials.trials)
+                for idx, init_params in enumerate(pending):
+                    self.logger.info(
+                        "[{}/{}] Initial param: {}".format(idx + 1, len(pending), init_params)
+                    )
+                    result = self.objective(init_params)
+                    self._inject_to_trials(trials, init_params, result)
+                # 立即持久化，保证 Trials 与 search_history.csv 一致
+                self._save_trials(trials)
+                n_done = len(trials.trials)
 
         total_evals = n_done + self.max_evals
         fmin(
@@ -203,8 +273,11 @@ class WorkflowConfigTuner(Tuner):
         for hp_name, (group_name, user_key) in hp_mapping.items():
             group_params = params.get(group_name, {})
             if isinstance(group_params, dict) and user_key in group_params:
+                val = group_params[user_key]
+                if val is None:
+                    continue  # None 值不注入 Trials
                 idxs[hp_name] = [tid]
-                vals[hp_name] = [float(group_params[user_key])]
+                vals[hp_name] = [float(val)]
 
         trial_doc = {
             'tid': tid,
@@ -272,12 +345,30 @@ class WorkflowConfigTuner(Tuner):
             for factor, factor_row in res_info.iterrows():
                 row[factor] = factor_row["risk"] if "risk" in factor_row.index else factor_row.iloc[0]
 
+        # 写入显式指定的参数
         for group, group_params in params.items():
             if isinstance(group_params, dict):
                 for k, v in group_params.items():
                     row[k] = v
             else:
                 row[group] = group_params
+
+        # 补全缺失的参数字段（从 workflow config yaml 读取默认值），确保行内每个字段都有值
+        workflow_config_path = self.tuner_config.get("workflow_config_path")
+        if workflow_config_path is not None:
+            try:
+                with open(workflow_config_path) as fp:
+                    wf_config = yaml.safe_load(fp)
+                model_defaults = wf_config.get("task", {}).get("model", {}).get("kwargs", {})
+                strategy_defaults = wf_config.get("port_analysis_config", {}).get("strategy", {}).get("kwargs", {})
+                for k, v in model_defaults.items():
+                    if k not in row and v is not None:
+                        row[k] = v
+                for k, v in strategy_defaults.items():
+                    if k not in row and v is not None:
+                        row[k] = v
+            except Exception:
+                pass
 
         self._hist_df = pd.concat([self._hist_df, pd.DataFrame([row])], ignore_index=True)
 

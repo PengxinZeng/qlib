@@ -7,8 +7,8 @@ experiment_name: em_val_all_weather
 
 market: &market all
 benchmark: &benchmark "510300"
-buy_rank_thre: &buy_rank_thre 0.32
-sell_rank_thre: &sell_rank_thre 0.88
+buy_rank_thre: &buy_rank_thre 0.07
+sell_rank_thre: &sell_rank_thre 0.94
 
 # 时间参数配置（取自 all_weather_data/dataset_split/split_info.json）
 time_config:
@@ -49,10 +49,10 @@ task:
         kwargs:
             fast: 17
             mid: 23
-            slow: 714.0
-            Nt: 589.0
-            epsilon: 0
-            min_valid_days_ratio: 0.50   # 最小有效数据天数 = int(lookback_days * ratio)
+            slow: 5302.0
+            Nt: 1613.0
+            epsilon: null
+            min_valid_days_ratio: 0.30   # 最小有效数据天数 = int(lookback_days * ratio)
             buy_rank_thre: *buy_rank_thre
             sell_rank_thre: *sell_rank_thre
 
@@ -115,4 +115,4 @@ task:
             buy_rank_thre: *buy_rank_thre
             sell_rank_thre: *sell_rank_thre
 
-# nohup python -u qlib/cli/run.py  examples/benchmarks/EMVal/workflow_config_all_weather.yaml > output/EMval.log 2>&1 &
+# nohup python -u qlib/cli/run.py  examples/benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml > output/EMval_WoMom.log 2>&1 &
