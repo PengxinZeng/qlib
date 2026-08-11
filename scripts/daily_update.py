@@ -20,6 +20,7 @@ import pandas as pd
 
 # 使用 rdagent conda 环境的 Python（包含 qlib + akshare）
 PYTHON = "/Users/zengpengxin/miniconda3/envs/rdagent/bin/python"
+QRUN = "/Users/zengpengxin/miniconda3/envs/rdagent/bin/qrun"
 
 # ---------------------------------------------------------------------------
 # 配置（集中管理路径 & 全局常量）
@@ -29,6 +30,7 @@ PYTHON = "/Users/zengpengxin/miniconda3/envs/rdagent/bin/python"
 class Config:
     qlib_root: Path = Path("/Users/zengpengxin/workspace/CodeBase/qlib")
     qlib_base: Path = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415")
+    all_weather_base: Path = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data")
     symbols: str | None = None          # 逗号分隔的 ETF 代码；None 表示全量
     today: date = field(default_factory=date.today)
     max_index_retries: int = 0          # 0 = 无限重试
@@ -52,6 +54,27 @@ class Config:
     @property
     def qlib_data_dir(self) -> Path:
         return self.qlib_base / "qlib_etf_index_Extend_wBond"
+
+    # ---- all_weather 数据链（SustainedBest 依赖） ----
+    @property
+    def pipeline_yaml(self) -> Path:
+        return self.qlib_root / "scripts" / "data_pipline" / "pipeline.yaml"
+
+    @property
+    def run_pipeline(self) -> Path:
+        return self.qlib_root / "scripts" / "data_pipline" / "run_pipeline.py"
+
+    @property
+    def emval_womom_config(self) -> Path:
+        return self.qlib_root / "examples" / "benchmarks" / "EMVal" / "workflow_config_all_weather_WoMom.yaml"
+
+    @property
+    def emval_config(self) -> Path:
+        return self.qlib_root / "examples" / "benchmarks" / "EMVal" / "workflow_config_all_weather.yaml"
+
+    @property
+    def sustained_best_config(self) -> Path:
+        return self.qlib_root / "examples" / "benchmarks" / "EMEnsemble" / "workflow_config_all_weather_SustainedBest.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +117,120 @@ def index_symbols_for_etfs(etf_codes: list[str], cfg: Config) -> list[str]:
     df["fund_code"] = df["fund_code"].str.strip()
     targets = df[df["fund_code"].isin(etf_codes)]["track_target_file"].unique()
     return [f"{f.replace('.csv', '')[2:]}.{f.replace('.csv', '')[:2]}" for f in targets]
+
+
+def update_yaml_dates(path: Path, today_str: str) -> None:
+    """将 workflow_config 的 data_end / backtest_end 更新为 today"""
+    content = path.read_text()
+    content = re.sub(r'(data_end:\s*&data_end\s*")[^"]*(")', rf'\g<1>{today_str}\2', content)
+    content = re.sub(r'(backtest_end:\s*&backtest_end\s*")[^"]*(")', rf'\g<1>{today_str}\2', content)
+    path.write_text(content)
+
+
+def latest_run_dir_for_experiment(cfg: Config, experiment_name: str) -> Path | None:
+    """按 experiment_name 返回最新含 positions_daily.csv 的 run 目录（mtime 最新）"""
+    mlruns = cfg.qlib_root / "mlruns"
+    best: Path | None = None
+    for exp_dir in mlruns.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        meta = exp_dir / "meta.yaml"
+        if not meta.exists():
+            continue
+        name_line = next((ln for ln in meta.read_text().splitlines() if ln.startswith("name:")), None)
+        if name_line is None:
+            continue
+        exp_name = name_line.split(":", 1)[1].strip().strip("'\"")
+        if exp_name != experiment_name:
+            continue
+        for run_dir in exp_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            pos = run_dir / "artifacts" / "analysis_csvs" / "positions_daily.csv"
+            if pos.exists() and (best is None or run_dir.stat().st_mtime > best.stat().st_mtime):
+                best = run_dir
+    return best
+
+
+def detect_signal(result_dir: Path | None) -> dict:
+    """
+    识别调仓信号（基于持仓状态 × score 信号的状态机）。
+
+    T+1 业务语义（第 t 日收盘后发信号，第 t+1 日执行）：
+      - 持有中（position > 0）且 score < 0  → 明日卖出
+      - 不持有（position == 0）且 score > 0 → 明日买入
+      - 其余情况（持有+score>0 / 空仓+score<0 / score=0）→ 不动作
+
+    用持仓状态与模型信号判断，不依赖持仓市值绝对值，故股价波动不会误判为调仓。
+    """
+    if result_dir is None:
+        return {"action": "unknown", "changes": [], "reason": "未找到实验结果目录"}
+
+    pos_path = result_dir / "artifacts" / "analysis_csvs" / "positions_daily.csv"
+    pred_path = result_dir / "artifacts" / "analysis_csvs" / "pred_df.csv"
+    if not pos_path.exists():
+        return {"action": "unknown", "changes": [], "reason": "未找到持仓文件", "result_dir": str(result_dir)}
+    if not pred_path.exists():
+        return {"action": "unknown", "changes": [], "reason": "未找到信号文件 pred_df.csv", "result_dir": str(result_dir)}
+
+    # 1) 持仓状态：positions_daily.csv（最近一个有效交易日 t）
+    pos_df = pd.read_csv(pos_path, index_col=0, parse_dates=True)
+    pos_df = pos_df[pos_df.index != "total_holding_ratio"]
+    valid_rows = pos_df.dropna(how="all")
+    if len(valid_rows) < 1:
+        return {"action": "unknown", "changes": [], "reason": "无有效持仓数据"}
+    curr_date = valid_rows.index[-1]
+    curr_pos = valid_rows.iloc[-1]  # 第 t 日各标的持仓市值
+
+    # 持仓列可能带 _CLEAN 后缀（HistRelaPB），统一用去后缀的标的代码对齐
+    sym_codes = [c for c in curr_pos.index if c not in ["account_value", "cash"]]
+
+    # 2) 信号：pred_df.csv 的 score（第 t 日各标的模型信号）
+    pred_df = pd.read_csv(pred_path)
+    if "score" not in pred_df.columns:
+        return {"action": "unknown", "changes": [], "reason": "pred_df.csv 缺少 score 列", "result_dir": str(result_dir)}
+    pred_df[pred_df.columns[0]] = pd.to_datetime(pred_df[pred_df.columns[0]], errors="coerce")
+    # 标的代码统一去 _CLEAN 后缀，便于与持仓列对齐
+    pred_df["instrument"] = pred_df["instrument"].astype(str).str.replace("_CLEAN", "", regex=False)
+    # pivot：行=日期、列=标的、值=score
+    sig_pivot = pred_df.pivot_table(index=pred_df.columns[0], columns="instrument", values="score", aggfunc="last")
+    # 对齐到持仓最新交易日 t
+    if curr_date not in sig_pivot.index:
+        return {"action": "unknown", "changes": [], "reason": f"信号文件缺少交易日 {curr_date:%Y-%m-%d}"}
+
+    # 3) 状态机判调仓
+    changes = []
+    holdings = []
+    for col in sym_codes:
+        code = col.replace("_CLEAN", "")  # 持仓列去后缀，统一标的代码
+        pos = curr_pos.get(col, 0)
+        pos = pos if pd.notna(pos) else 0
+        # 第 t 日该标的 score（缺失视为 0 = 不动作）
+        score = sig_pivot.at[curr_date, code] if code in sig_pivot.columns else 0.0
+        score = score if pd.notna(score) else 0.0
+
+        if pos > 0 and score < 0:
+            changes.append({"symbol": code, "action": "卖出", "pos": pos, "score": score})
+        elif pos <= 0 and score > 0:
+            changes.append({"symbol": code, "action": "买入", "pos": pos, "score": score})
+
+        # 当前持仓列表（持仓市值 > 0）
+        if pos > 0:
+            holdings.append({"symbol": code, "pos": pos})
+
+    # 持仓按市值降序
+    holdings.sort(key=lambda h: h["pos"], reverse=True)
+
+    action = "rebalance" if changes else "hold"
+    return {"action": action, "changes": changes, "holdings": holdings,
+            "curr_date": str(curr_date)[:10],
+            "result_dir": str(result_dir)}
+
+
+def notify_macos(title: str, message: str) -> None:
+    """通过 osascript 发送 macOS 系统通知"""
+    script = f'display notification "{message}" with title "{title}" sound name "Glass"'
+    subprocess.run(["osascript", "-e", script], check=False)
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +324,7 @@ class BondRateStep(UpdateStep):
 
 
 class MergeConvertStep(UpdateStep):
-    label = "合并清洗 + 转 qlib bin"
+    label = "合并清洗 + 转 qlib bin（HistRelaPB 数据链）"
 
     def execute(self, cfg: Config) -> None:
         run([PYTHON, "scripts/data_processors/merge_etf_val/merge_clean_data.py"], cfg)
@@ -196,118 +333,124 @@ class MergeConvertStep(UpdateStep):
              "--qlib_dir", str(cfg.qlib_data_dir)], cfg)
 
 
+class AllWeatherUpdateStep(UpdateStep):
+    """all_weather 数据链增量更新（SustainedBest 依赖的数据源）"""
+    label = "更新 all_weather 数据（增量）"
+
+    def execute(self, cfg: Config) -> None:
+        run([PYTHON, str(cfg.run_pipeline),
+             "--config", str(cfg.pipeline_yaml),
+             "--incremental"], cfg)
+
+
+class EMValUpdateStep(UpdateStep):
+    """更新两个 EMVal 模型信号，并将最新 run 同步到 SustainedBest 配置的 exp_path"""
+    label = "更新 EMVal 信号 + 同步 exp_path"
+
+    def execute(self, cfg: Config) -> None:
+        today_str = cfg.today.isoformat()
+        for config in [cfg.emval_womom_config, cfg.emval_config]:
+            logging.info(f"  更新 {config.name} 日期 → {today_str}")
+            update_yaml_dates(config, today_str)
+            run([QRUN, str(config)], cfg)
+
+        womom_run = latest_run_dir_for_experiment(cfg, "em_val_all_weather_womom")
+        emval_run = latest_run_dir_for_experiment(cfg, "em_val_all_weather")
+        if womom_run is None or emval_run is None:
+            raise RuntimeError(
+                f"EMVal 最新 run 未找到: womom={womom_run}, emval={emval_run}"
+            )
+
+        # 将 SustainedBest 配置中两个 exp_path 依次替换为最新 run（绝对路径）。
+        # 注意：SustainedBest 配置中 exp_path 第一次出现对应 emval_womom，第二次对应 emval，
+        # 不能用两次 count=1 的 re.sub（第二次会再次命中第一个已替换的 exp_path），
+        # 改为用计数器按出现顺序逐个替换（re.sub 回调从左到右调用，顺序与配置一致）。
+        sb = cfg.sustained_best_config
+        content = sb.read_text()
+        new_paths = [str(womom_run.resolve()), str(emval_run.resolve())]
+        counter = {"i": 0}
+
+        def _swap_exp_path(m: re.Match) -> str:
+            idx = counter["i"]
+            counter["i"] += 1
+            # 防御：超出范围则保留原值（正常配置只有 2 个 exp_path）
+            replacement = new_paths[idx] if idx < len(new_paths) else m.group(2)
+            return m.group(1) + replacement + m.group(2)
+
+        content = re.sub(r'(exp_path:\s*")[^"]*(")', _swap_exp_path, content)
+        sb.write_text(content)
+        logging.info(f"  SustainedBest exp_path 已更新: womom={womom_run.name}, emval={emval_run.name}")
+
+
+class EMEnsembleBacktestStep(UpdateStep):
+    """EMEnsemble (SustainedBest) 回测：生成最新持仓"""
+    label = "EMEnsemble (SustainedBest) 回测"
+
+    def execute(self, cfg: Config) -> None:
+        today_str = cfg.today.isoformat()
+        logging.info(f"  更新 workflow_config_all_weather_SustainedBest.yaml 日期 → {today_str}")
+        update_yaml_dates(cfg.sustained_best_config, today_str)
+        run([QRUN, str(cfg.sustained_best_config)], cfg)
+
+
 class BacktestStep(UpdateStep):
     label = "HistRelaPB 回测"
 
     def execute(self, cfg: Config) -> None:
         today_str = cfg.today.isoformat()
         logging.info(f"  更新 workflow_config.yaml 日期 → {today_str}")
-        content = cfg.workflow_config.read_text()
-        content = re.sub(r'(data_end:\s*&data_end\s*")[^"]*(")', rf'\g<1>{today_str}\2', content)
-        content = re.sub(r'(backtest_end:\s*&backtest_end\s*")[^"]*(")', rf'\g<1>{today_str}\2', content)
-        cfg.workflow_config.write_text(content)
-        run(["/Users/zengpengxin/miniconda3/envs/rdagent/bin/qrun", str(cfg.workflow_config)], cfg)
-
-
-def _latest_signals_csv(cfg: Config) -> Path | None:
-    """返回最新一次回测产出的 _all_signals.csv 路径"""
-    mlruns = cfg.qlib_root / "mlruns"
-    candidates = []
-    for exp_dir in mlruns.iterdir():
-        if not exp_dir.is_dir():
-            continue
-        for run_dir in exp_dir.iterdir():
-            sig = run_dir / "artifacts" / "signal_detail" / "_all_signals.csv"
-            if sig.exists():
-                candidates.append((run_dir.stat().st_mtime, sig))
-    return max(candidates)[1] if candidates else None
-
-
-def latest_experiment_result_dir(cfg: Config) -> Path | None:
-    signals_csv = _latest_signals_csv(cfg)
-    return signals_csv.parent.parent if signals_csv else None
-
-
-def detect_signal(cfg: Config) -> dict:
-    """对比最近两个交易日的持仓，识别调仓信号（以持仓数据变化为准）"""
-    result_dir = latest_experiment_result_dir(cfg)
-    if result_dir is None:
-        return {"action": "unknown", "changes": [], "reason": "未找到实验结果目录"}
-
-    pos_path = result_dir / "analysis_csvs" / "positions_daily.csv"
-    if not pos_path.exists():
-        return {"action": "unknown", "changes": [], "reason": "未找到持仓文件", "result_dir": str(result_dir)}
-
-    pos_df = pd.read_csv(pos_path, index_col=0, parse_dates=True)
-    # 移除统计行
-    pos_df = pos_df[pos_df.index != "total_holding_ratio"]
-    
-    if len(pos_df) < 2:
-        return {"action": "unknown", "changes": [], "reason": "持仓数据不足两日"}
-
-    # 获取最近两个交易日（排除空行）
-    valid_rows = pos_df.dropna(how="all")
-    if len(valid_rows) < 2:
-        return {"action": "hold", "changes": [], "reason": "有效持仓数据不足两日"}
-
-    prev_date = valid_rows.index[-2]
-    curr_date = valid_rows.index[-1]
-    prev_pos = valid_rows.iloc[-2]
-    curr_pos = valid_rows.iloc[-1]
-
-    # ETF 列（排除 account_value 和 cash）
-    etf_cols = [c for c in prev_pos.index if c not in ["account_value", "cash"]]
-    
-    changes = []
-    for col in etf_cols:
-        v1 = prev_pos.get(col, 0)
-        v2 = curr_pos.get(col, 0)
-        # 处理 NaN
-        v1 = v1 if pd.notna(v1) else 0
-        v2 = v2 if pd.notna(v2) else 0
-        if v1 != v2:
-            changes.append({"symbol": col, "prev_pos": v1, "curr_pos": v2})
-
-    action = "rebalance" if changes else "hold"
-    return {"action": action, "changes": changes,
-            "prev_date": str(prev_date)[:10], "curr_date": str(curr_date)[:10],
-            "result_dir": str(result_dir)}
-
-
-def notify_macos(title: str, message: str) -> None:
-    """通过 osascript 发送 macOS 系统通知"""
-    script = f'display notification "{message}" with title "{title}" sound name "Glass"'
-    subprocess.run(["osascript", "-e", script], check=False)
+        update_yaml_dates(cfg.workflow_config, today_str)
+        run([QRUN, str(cfg.workflow_config)], cfg)
 
 
 class SignalNotifyStep(UpdateStep):
     label = "信号检测 + 通知"
 
     def execute(self, cfg: Config) -> None:
-        result = detect_signal(cfg)
+        strategies = [
+            ("HistRelaPB", "hist_rela_pb_etf"),
+            ("SustainedBest", "em_ensemble_sustainedbest_all_weather"),
+        ]
+        for title, exp_name in strategies:
+            result_dir = latest_run_dir_for_experiment(cfg, exp_name)
+            result = detect_signal(result_dir)
+            self._report(title, result)
+
+    def _report(self, title: str, result: dict) -> None:
         action = result.get("action", "unknown")
         changes = result.get("changes", [])
+        holdings = result.get("holdings", [])
         result_dir = result.get("result_dir")
 
+        # 当前持仓列表（按市值降序）
+        hold_str = "、".join(h["symbol"].replace("_CLEAN", "") for h in holdings)
+        hold_txt = f"当前持仓: {hold_str}" if hold_str else "当前持仓: 空仓"
+
         if result_dir:
-            logging.info(f"  [实验结果] {result_dir}")
+            logging.info(f"  [{title}] 实验结果: {result_dir}")
 
         if action == "rebalance":
             detail_lines = []
             for c in changes:
                 sym = c["symbol"].replace("_CLEAN", "")
-                direction = "↑买入" if c["curr_pos"] > c["prev_pos"] else "↓卖出"
+                direction = "↑买入" if c.get("action") == "买入" else "↓卖出"
                 detail_lines.append(f"{sym} {direction}")
             detail = "、".join(detail_lines[:5])
             if len(changes) > 5:
                 detail += f" 等{len(changes)}只"
-            msg = f"{result.get('curr_date', '')} 调仓: {detail}"
-            logging.info(f"  [信号] 调仓  {msg}")
-            notify_macos("HistRelaPB 调仓信号", msg)
+            msg = f"{result.get('curr_date', '')} 需调仓: {detail}"
+            logging.info(f"  [{title}] 需调仓  {msg}；{hold_txt}")
+            notify_macos(f"{title} 明日需调仓", f"{msg}（明日执行）；{hold_txt}")
         elif action == "hold":
-            logging.info(f"  [信号] 无操作，持仓不变（{result.get('reason', '')}）")
+            msg = f"无操作，持仓不变；{hold_txt}"
+            reason = result.get("reason", "")
+            logging.info(f"  [{title}] {msg}" + (f"（{reason}）" if reason else ""))
+            notify_macos(f"{title} 持仓不变", msg)
         else:
-            logging.info(f"  [信号] {result.get('reason', action)}")
+            reason = result.get("reason", action)
+            msg = f"{reason}；{hold_txt}"
+            logging.info(f"  [{title}] {msg}")
+            notify_macos(f"{title} 检测异常", msg)
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +463,11 @@ class DailyUpdatePipeline:
         IndexValuationStep(),
         BondRateStep(),
         MergeConvertStep(),
-        BacktestStep(),
-        SignalNotifyStep(),
+        AllWeatherUpdateStep(),      # all_weather 数据增量更新
+        EMValUpdateStep(),           # EMVal 信号 + exp_path 同步
+        EMEnsembleBacktestStep(),    # SustainedBest 回测
+        BacktestStep(),              # HistRelaPB 回测
+        SignalNotifyStep(),          # 双策略检测通知
     ]
 
     def __init__(self, cfg: Config) -> None:

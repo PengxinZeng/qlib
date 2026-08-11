@@ -4,20 +4,42 @@
 
 # 待评测的配置（可跨方法混排；每个都是完整可 qrun 的 workflow_config）
 configs:
-  - alias: equalweight
-    path: ../benchmarks/AllIn/workflow_config_all_weather_equalweight.yaml           # 等权全市场基准
-  - alias: allin_total_return
-    path: ../benchmarks/AllIn/workflow_config_all_weather.yaml                     # 复用现有(score_type=total_return)
-  - alias: allin_annualized
-    path: ../benchmarks/AllIn/workflow_config_all_weather_annualized.yaml
-  - alias: allin_information_ratio
-    path: ../benchmarks/AllIn/workflow_config_all_weather_information_ratio.yaml
-  - alias: macd
-    path: ../benchmarks/MACDSignal/workflow_config_all_weather.yaml                  # MACD 趋势择时
-  - alias: emVal_WoMom
-    path: ../benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml                      # EMVal 模型
-  - alias: emVal
-    path: ../benchmarks/EMVal/workflow_config_all_weather.yaml                      # EMVal 模型
+  # - alias: equalweight
+  #   path: ../benchmarks/AllIn/workflow_config_all_weather_equalweight.yaml           # 等权全市场基准
+  # - alias: allin_total_return
+  #   path: ../benchmarks/AllIn/workflow_config_all_weather.yaml                     # 复用现有(score_type=total_return)
+  # - alias: allin_annualized
+  #   path: ../benchmarks/AllIn/workflow_config_all_weather_annualized.yaml
+  # - alias: allin_information_ratio
+  #   path: ../benchmarks/AllIn/workflow_config_all_weather_information_ratio.yaml
+  # - alias: macd
+  #   path: ../benchmarks/MACDSignal/workflow_config_all_weather.yaml                  # MACD 趋势择时
+  # - alias: emVal_WoMom
+  #   path: ../benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml                      # EMVal 模型
+  # - alias: emVal
+  #   path: ../benchmarks/EMVal/workflow_config_all_weather.yaml                      # EMVal 模型
+  # - alias: EMEnsemble
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather.yaml                      # EMVal 模型
+  # - alias: EMEnsembleDynamicBest
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_DynamicBest.yaml                      # EMVal 模型
+  # - alias: EMEnsembleDynamicBestOverTake 
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_DynamicBest_OverTake.yaml                      # EMVal 模型
+  # - alias: EMEnsembleDynamicBestLong
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_DynamicBestLong.yaml                      # EMVal 模型
+
+  # ---- SustainedBest：持续最优切换（其他模型持续优于 M 达 N=256 天才切） ----
+  - alias: EMEnsembleSustainedBest
+    path: ../benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml                      # EMEnsemble SustainedBest
+
+  # ---- EMEnsemble × MACD 组合（在原模型池中加入 MACD 趋势模型） ----
+  # - alias: EMEnsemble_MACD
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_MACD.yaml                                # EMEnsemble + MACD
+  # - alias: EMEnsembleDynamicBest_MACD
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_DynamicBest_MACD.yaml                    # EMEnsemble DynamicBest + MACD
+  # - alias: EMEnsembleDynamicBestOverTake_MACD
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_DynamicBest_OverTake_MACD.yaml           # EMEnsemble DynamicBest OverTake + MACD
+  # - alias: EMEnsembleDynamicBestLong_MACD
+  #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_DynamicBestLong_MACD.yaml                # EMEnsemble DynamicBestLong + MACD
 
 # 测试段：fit 段沿用各配置自带的 train/valid(模型在 train 排序 + valid 选 K)，
 # runner 仅覆盖 test 段与回测窗口。A=test 段，B=testB 段。

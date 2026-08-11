@@ -2,11 +2,14 @@
 run_pipeline.py — 全天候数据 Pipeline 执行入口
 
 用法：
-    # 执行全部步骤
-    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml 
+    # 执行全部步骤（全量下载）
+    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml
 
     # 只执行指定 type 的步骤（可多个）
-    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml  --only TencentETFCollector YahooCollector
+    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml --only TencentETFCollector YahooCollector
+
+    # 增量更新（collector 只拉取已有 CSV 末尾之后的新数据，processors 全量重建）
+    python scripts/data_pipline/run_pipeline.py --config scripts/data_pipline/pipeline.yaml --incremental
 
 """
 
@@ -60,11 +63,18 @@ def main():
         metavar="TYPE",
         help="只运行指定 type 的步骤，默认全部",
     )
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="增量更新模式：collector 从已有 CSV 末尾追加，processors 全量重建（默认全量下载）",
+    )
     args = parser.parse_args()
 
     setup_logging()
 
     runner = PipelineRunner(args.config)
+    if args.incremental:
+        runner.set_incremental(True)
     runner.run(only=args.only)
 
 

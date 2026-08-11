@@ -25,6 +25,7 @@ pipelines:
     symbols:
       - {code: "018846", name: "华泰保兴6个月持有期债券A",       index: "主动管理-债券-混债"}
       - {code: "002276", name: "中邮纯债恒利债券A",       index: "主动管理-债券-混债"}
+      - {code: "005215", name: "南方全天候策略混合A",       index: "主动管理"}   # 场外基金，非场内ETF；腾讯ETF接口无此代码，走天天基金净值
     start: *start
     force: *force
     output_dir: source/bond_cn # 债券
@@ -52,6 +53,9 @@ pipelines:
       - {code: "512100", name: "中证1000ETF南方",      index: "1B0852"}
       - {code: "159845", name: "中证1000ETF华夏",      index: "1B0852"}
       - {code: "512890", name: "红利低波ETF华泰",      index: "H30269"}
+      # 563020 已注释：腾讯接口不提供该标的 hfqday（后复权）数据，仅有 day（不复权），
+      # 若需纳入请移入 equity_cn_unadj（fq_type=""）并注意除权价低估收益问题
+      # - {code: "563020", name: "红利低波ETF易方达",      index: "H30269"}
       - {code: "159920", name: "恒生ETF华夏",      index: "HSI"}
       - {code: "513660", name: "恒生ETF华夏",      index: "HSI"}
       # - {code: "510210", name: "上证指数ETF富国",      index: "1A0001"}

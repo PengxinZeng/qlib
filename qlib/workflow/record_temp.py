@@ -15,6 +15,7 @@ from matplotlib import rcParams
 
 from qlib.utils.exceptions import LoadObjectError
 from ..contrib.evaluate import risk_analysis, indicator_analysis
+from ..contrib.model.em_ensemble import ReturnBasedAssembler
 
 from ..data.dataset import DatasetH
 from ..data.dataset.handler import DataHandlerLP
@@ -918,12 +919,229 @@ class ReportRecord(RecordTemp):
         return []
 
 
+class EMEnsembleChartRecord(ACRecordTemp):
+    """
+    EMEnsemble 信号概览图 Record
+
+    将所有股票汇聚到一张大图中，每只股票占一个子图，各曲线在同一张图、使用不同 y 轴：
+      - 左轴：收盘价 + Ensemble score 背景着色（score>0=绿，score<=0=无色）
+      - 右轴1：各模型原始信号（score，1/0/-1）+ 软信号（soft，[-1,1]）+ Ensemble score（黑色粗线）
+      - 右轴2：各模型累计收益率（cumret，复利）
+
+    生成文件：em_ensemble_chart/em_ensemble_overview.png
+    """
+
+    artifact_path = "em_ensemble_chart"
+    depend_cls = SignalRecord
+
+    def __init__(self, recorder, dataset=None, skip_existing=False):
+        super().__init__(recorder=recorder, skip_existing=skip_existing)
+        self.dataset = dataset
+
+    def _generate(self, **kwargs):
+        rcParams["font.sans-serif"] = ["Arial Unicode MS", "SimHei", "DejaVu Sans"]
+        rcParams["axes.unicode_minus"] = False
+
+        pred_df = self.load("pred.pkl")
+        if pred_df.empty:
+            logger.warning("EMEnsembleChartRecord: pred.pkl is empty, skip.")
+            return {}
+
+        # 从 dataset 加载收盘价（test segment）
+        close_wide: pd.DataFrame | None = None
+        if self.dataset is not None:
+            try:
+                feat = self.dataset.prepare("test", col_set="feature", data_key=DataHandlerLP.DK_I)
+                if "close" in feat.columns:
+                    close_wide = feat["close"].unstack(level="instrument")
+            except Exception as e:
+                logger.warning(f"EMEnsembleChartRecord: Failed to load close prices: {e}")
+
+        # 识别模型列：{model_name}_score / _soft / _cumret
+        score_cols = [c for c in pred_df.columns if c.endswith("_score")]
+        model_names = [c[:-len("_score")] for c in score_cols]
+        if len(model_names) == 0:
+            logger.warning("EMEnsembleChartRecord: no model signal columns found, skip.")
+            return {}
+
+        instruments = sorted(pred_df.index.get_level_values("instrument").unique())
+        n = len(instruments)
+        if n == 0:
+            logger.warning("EMEnsembleChartRecord: no instruments found.")
+            return {}
+
+        # 布局：每行最多 ncols 只股票，每只股票占 1 个子图（多 y 轴合并绘制）
+        ncols = min(4, n)
+        n_inst_rows = (n + ncols - 1) // ncols
+        nrows = n_inst_rows
+
+        fig_w = max(20 * ncols, 12)  # 每张子图再加宽一倍
+        fig_h = max(3 * nrows, 6)
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(fig_w, fig_h), squeeze=False)
+        fig.suptitle("EMEnsemble 信号总览（价格 / 原始信号 / 软信号 / 累计收益率）", fontsize=13)
+
+        # 模型颜色
+        model_colors = ["#E91E63", "#3949AB", "#FF9800", "#00ACC1", "#7B1FA2", "#F44336"]
+
+        for i, inst in enumerate(instruments):
+            inst_row = i // ncols
+            col = i % ncols
+            ax_p = axes[inst_row][col]            # 左轴：价格
+            ax_sig = ax_p.twinx()                 # 右轴1：score + soft + Ensemble
+            ax_ret = ax_p.twinx()                 # 右轴2：cumret
+
+            inst_pred = pred_df.xs(inst, level="instrument")
+            dates = inst_pred.index
+
+            price_handles = []
+
+            # --- 左轴：收盘价 + Ensemble score 背景着色 ---
+            if close_wide is not None and inst in close_wide.columns:
+                h, = ax_p.plot(dates, close_wide[inst].reindex(dates),
+                               color="#212121", linewidth=0.125, label="Close")
+                price_handles.append((h, "Close"))
+            if "score" in inst_pred.columns:
+                _fill_score_background(ax_p, dates, inst_pred["score"])
+
+            ax_p.set_title(inst.replace("_CLEAN", ""), fontsize=8, pad=2)
+            ax_p.set_ylabel("Price", fontsize=6)
+            ax_p.tick_params(labelsize=5)
+            ax_p.xaxis.set_major_formatter(mdates.DateFormatter("%y-%m"))
+            ax_p.xaxis.set_major_locator(mdates.AutoDateLocator())
+            plt.setp(ax_p.xaxis.get_majorticklabels(), rotation=45, ha="right", fontsize=4)
+
+            # --- 右轴1：各模型原始信号（score）+ 软信号（soft）+ Ensemble score ---
+            sig_handles = []
+            for mi, name in enumerate(model_names):
+                col_name = f"{name}_score"
+                if col_name in inst_pred.columns:
+                    h, = ax_sig.plot(dates, inst_pred[col_name], color=model_colors[mi % len(model_colors)],
+                                     linewidth=0.15, alpha=0.8, linestyle="-", label=f"{name}_score")
+                    sig_handles.append((h, f"{name}_score"))
+                col_name = f"{name}_soft"
+                if col_name in inst_pred.columns:
+                    h, = ax_sig.plot(dates, inst_pred[col_name], color=model_colors[mi % len(model_colors)],
+                                     linewidth=0.15, alpha=0.5, linestyle="--", label=f"{name}_soft")
+                    sig_handles.append((h, f"{name}_soft"))
+            if "score" in inst_pred.columns:
+                h, = ax_sig.plot(dates, inst_pred["score"], color="black",
+                                 linewidth=0.4, alpha=0.9, label="Ensemble")
+                sig_handles.append((h, "Ensemble"))
+            ax_sig.axhline(0, color="black", linewidth=0.15, alpha=0.5)
+            ax_sig.set_ylim(-1.2, 1.2)
+            ax_sig.set_ylabel("Score/Soft", fontsize=6)
+            ax_sig.tick_params(labelsize=5)
+
+            # --- 右轴2：各模型累计收益率（cumret） ---
+            ret_handles = []
+            for mi, name in enumerate(model_names):
+                col_name = f"{name}_cumret"
+                if col_name in inst_pred.columns:
+                    h, = ax_ret.plot(dates, inst_pred[col_name], color=model_colors[mi % len(model_colors)],
+                                     linewidth=0.15, alpha=0.8, linestyle="-.", label=f"{name}_cumret")
+                    ret_handles.append((h, f"{name}_cumret"))
+
+            # Ensemble 信号累计收益率：复用 _simulate_return 的 T+1 成交语义，与各模型 cumret 同口径对比
+            if "score" in inst_pred.columns and close_wide is not None and inst in close_wide.columns:
+                ens_ret = ReturnBasedAssembler._simulate_return(
+                    inst_pred["score"], close_wide[inst].reindex(dates)
+                )
+                ens_cumret = (1.0 + ens_ret.fillna(0.0)).cumprod() - 1.0
+                h, = ax_ret.plot(dates, ens_cumret, color="black", linewidth=0.6,
+                                 linestyle="--", alpha=0.9, marker="o", markersize=0.75,
+                                 label="Ensemble CumRet")
+                ret_handles.append((h, "Ensemble CumRet"))
+
+            ax_ret.axhline(0, color="black", linewidth=0.15, alpha=0.5)
+            ax_ret.set_ylabel("CumRet", fontsize=6)
+            ax_ret.tick_params(labelsize=5)
+            # 右轴2 向外偏移，避免与右轴1 刻度标签重叠
+            ax_ret.spines["right"].set_position(("outward", 60))
+
+            # 价格轴置于最上层，避免被右轴曲线遮挡
+            ax_p.set_zorder(ax_ret.get_zorder() + 1)
+            ax_p.patch.set_visible(False)
+
+            # 每个子图都绘制图例
+            all_h = price_handles + sig_handles + ret_handles
+            if all_h:
+                ax_p.legend([h for h, _ in all_h], [lb for _, lb in all_h],
+                            fontsize=5, loc="upper left")
+
+        # 隐藏多余子图
+        for i in range(n, n_inst_rows * ncols):
+            inst_row = i // ncols
+            col = i % ncols
+            axes[inst_row][col].set_visible(False)
+
+        # 为 suptitle 预留顶部空间，避免大标题与第一行子图标题重叠
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        save_root = os.path.join(artifact_uri, self.artifact_path)
+        os.makedirs(save_root, exist_ok=True)
+        save_path = os.path.join(save_root, "em_ensemble_overview.png")
+        fig.savefig(save_path, dpi=120, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"EMEnsembleChartRecord: saved overview chart → {save_path}")
+
+        # 输出收益率对比 CSV：每行一只股票，每列各模型 + EMEnsemble 均取「测试区间收益」（T+1 复利累计），
+        # 最后一列为 EMEnsemble 相比最好单模型测试区间收益的超额，按超额收益降序排序。
+        # 说明：pred.pkl 的 {name}_cumret 是从股票成立起累计的总体收益（组装器全量计算、output 阶段仅裁剪行），
+        #       不能用它对比 EMEnsemble 列；故改用各模型原始信号 {name}_score 从测试区间起点做 T+1 复利累计。
+        rows = {}
+        for inst in instruments:
+            inst_pred = pred_df.xs(inst, level="instrument")
+            row = {}
+            close_inst = None
+            if close_wide is not None and inst in close_wide.columns:
+                close_inst = close_wide[inst].reindex(inst_pred.index)
+            for name in model_names:
+                score_col = f"{name}_score"
+                if score_col in inst_pred.columns and close_inst is not None:
+                    sig = inst_pred[score_col]
+                    ret = ReturnBasedAssembler._simulate_return(sig, close_inst)
+                    cum = (1.0 + ret.fillna(0.0)).cumprod() - 1.0
+                    row[name] = float(cum.iloc[-1])
+                else:
+                    row[name] = float("nan")
+            # EMEnsemble 总体累计收益率：复用 _simulate_return 的 T+1 成交语义，同测试区间口径
+            if "score" in inst_pred.columns and close_inst is not None:
+                ens_ret = ReturnBasedAssembler._simulate_return(inst_pred["score"], close_inst)
+                ens_cumret = (1.0 + ens_ret.fillna(0.0)).cumprod() - 1.0
+                row["EMEnsemble"] = float(ens_cumret.iloc[-1])
+            else:
+                row["EMEnsemble"] = float("nan")
+            rows[inst] = row
+
+        ret_df = pd.DataFrame.from_dict(rows, orient="index")
+        ret_df.index.name = "instrument"
+        # 超额收益 = EMEnsemble 收益率 - 最好单模型收益率
+        best_model_cols = [c for c in ret_df.columns if c != "EMEnsemble"]
+        ret_df["excess_vs_best"] = ret_df["EMEnsemble"] - ret_df[best_model_cols].max(axis=1)
+        # 按超额收益降序排序
+        ret_df = ret_df.sort_values("excess_vs_best", ascending=False)
+
+        csv_path = os.path.join(save_root, "em_ensemble_returns.csv")
+        ret_df.to_csv(csv_path)
+        logger.info(f"EMEnsembleChartRecord: saved returns csv → {csv_path}")
+        return {}
+
+    def list(self):
+        return []
+
+
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
 
 def _fill_score_background(ax, dates, score_s, alpha: float = 0.12) -> None:
-    """在 ax 上按 score 值填充背景色（+1=绿，-1=红）"""
+    """
+    在 ax 上按 score 值填充背景色（score>0=绿，score<0=红，score=0=无色）。
+
+    按符号归并连续区间：既支持三值信号（1/0/-1，同符号即为同值，行为与精确值归并一致），
+    也支持连续值信号（如 [-1, 1] 的软信号，同正/同负归并为一段着色）。
+    """
     dates_arr = np.array(dates)
     score_arr = score_s.reindex(dates).fillna(0).values
     i = 0
@@ -934,7 +1152,7 @@ def _fill_score_background(ax, dates, score_s, alpha: float = 0.12) -> None:
             continue
         color = "#4CAF50" if s > 0 else "#F44336"
         j = i + 1
-        while j < len(dates_arr) and score_arr[j] == s:
+        while j < len(dates_arr) and np.sign(score_arr[j]) == np.sign(s):
             j += 1
         ax.axvspan(dates_arr[i], dates_arr[j - 1], color=color, alpha=alpha)
         i = j

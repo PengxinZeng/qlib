@@ -17,6 +17,18 @@ class PipelineRunner:
         self.steps = cfg["pipelines"]
         self.output_base.mkdir(parents=True, exist_ok=True)
 
+    def set_incremental(self, incremental: bool = True) -> None:
+        """
+        设置是否走增量更新模式。
+
+        增量模式：将所有 collector 步骤的 force 覆盖为 False，
+        使其通过 _incremental_start 从已有 CSV 末尾追加新数据；
+        processors（merge/filter/clean/dump）无 force 概念，保持全量重建（幂等）。
+        """
+        for step_cfg in self.steps:
+            if "force" in step_cfg:
+                step_cfg["force"] = not incremental
+
     def run(self, only: list[str] | None = None):
         errors = []
         for i, step_cfg in enumerate(self.steps):

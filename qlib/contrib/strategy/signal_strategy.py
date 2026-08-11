@@ -677,3 +677,57 @@ class EvenWeightStrategy(WeightStrategyBase):
             trade_end_time=trade_end_time,
         )
         return TradeDecisionWO(order_list, self)
+
+
+class TargetWeightStrategy(WeightStrategyBase):
+    """
+    目标权重策略：直接以信号值作为目标持仓比例，自动调仓达到该比例。
+
+    配合 EMEnsemble 模型使用：模型输出的信号即为每日持仓比例（weight，取值 [0, 1]）。
+    策略将信号值作为目标权重，通过 OrderGenWOInteract 自动生成买卖订单，
+    使实际持仓逐步调整到目标持仓比例。
+
+    信号语义：
+    - weight > 0：目标持仓比例（如 0.5 表示持有该股票 50% 仓位）
+    - weight <= 0 或 NaN：不持仓（自动清仓）
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def generate_target_weight_position(self, score, current, trade_start_time, trade_end_time):
+        """
+        生成目标持仓权重：直接使用信号值作为目标持仓比例
+
+        Parameters
+        ----------
+        score : pd.Series 或 pd.DataFrame
+            信号，index为股票代码，值为持仓比例（weight）
+        current : Position
+            当前持仓
+        trade_start_time : pd.Timestamp
+            交易开始时间
+        trade_end_time : pd.Timestamp
+            交易结束时间
+
+        Returns
+        -------
+        dict
+            目标持仓权重，{stock_id: weight}
+        """
+        # 如果score是DataFrame，提取weight列；如果是Series，直接使用
+        if isinstance(score, pd.DataFrame):
+            if "weight" in score.columns:
+                signal_weight = score["weight"]
+            else:
+                # 如果没有weight列，假设第一列是信号
+                signal_weight = score.iloc[:, 0]
+        else:
+            signal_weight = score
+
+        # 过滤掉 NaN 和 <= 0 的权重（不持仓）
+        valid = signal_weight.dropna()
+        valid = valid[valid > 0]
+
+        target_weight_position = {stock: float(w) for stock, w in valid.items()}
+        return target_weight_position
