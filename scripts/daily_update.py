@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -127,10 +128,15 @@ def update_yaml_dates(path: Path, today_str: str) -> None:
     path.write_text(content)
 
 
-def latest_run_dir_for_experiment(cfg: Config, experiment_name: str) -> Path | None:
-    """按 experiment_name 返回最新含 positions_daily.csv 的 run 目录（mtime 最新）"""
+@dataclass
+class BacktestResult:
+    """回测步骤的产出 DTO：本次 qrun 新生成的 run 目录"""
+    run_dir: Path
+
+
+def _iter_experiment_run_dirs(cfg: Config, experiment_name: str) -> Iterator[Path]:
+    """遍历指定实验名下所有 run 目录（按 mlruns 实验 meta.yaml 的 name 匹配）"""
     mlruns = cfg.qlib_root / "mlruns"
-    best: Path | None = None
     for exp_dir in mlruns.iterdir():
         if not exp_dir.is_dir():
             continue
@@ -144,12 +150,27 @@ def latest_run_dir_for_experiment(cfg: Config, experiment_name: str) -> Path | N
         if exp_name != experiment_name:
             continue
         for run_dir in exp_dir.iterdir():
-            if not run_dir.is_dir():
-                continue
-            pos = run_dir / "artifacts" / "analysis_csvs" / "positions_daily.csv"
-            if pos.exists() and (best is None or run_dir.stat().st_mtime > best.stat().st_mtime):
-                best = run_dir
-    return best
+            if run_dir.is_dir():
+                yield run_dir
+
+
+def new_run_after_qrun(cfg: Config, exp_name: str, cmd: list[str]) -> Path:
+    """
+    执行 qrun，返回本次新增的唯一 run 目录。
+
+    用 qrun 前后 run 目录集合的差集精确定位本次回测产生的 run，
+    不依赖 mtime 扫描 / analysis_csvs 过滤，杜绝回退选中旧 run。
+    """
+    before = {str(p.resolve()) for p in _iter_experiment_run_dirs(cfg, exp_name)}
+    run(cmd, cfg)
+    after = {str(p.resolve()) for p in _iter_experiment_run_dirs(cfg, exp_name)}
+    new_runs = after - before
+    if len(new_runs) != 1:
+        raise RuntimeError(
+            f"{exp_name} 回测后新增 run 数量异常: {len(new_runs)}"
+            f"（before={len(before)}, after={len(after)}）"
+        )
+    return Path(new_runs.pop())
 
 
 def detect_signal(result_dir: Path | None) -> dict:
@@ -243,16 +264,16 @@ class UpdateStep(ABC):
     def label(self) -> str: ...
 
     @abstractmethod
-    def execute(self, cfg: Config) -> None: ...
+    def execute(self, cfg: Config) -> BacktestResult | None: ...
 
-    def run(self, cfg: Config, step_no: str) -> float:
-        """执行并返回耗时（秒）"""
+    def run(self, cfg: Config, step_no: str) -> tuple[float, BacktestResult | None]:
+        """执行步骤，返回（耗时秒, 步骤产出）；无产出步骤返回 None"""
         logging.info(f"[{step_no}] {self.label}...")
         t0 = time.time()
-        self.execute(cfg)
+        result = self.execute(cfg)
         cost = time.time() - t0
         logging.info(f"[{step_no}] 完成，耗时 {fmt_elapsed(cost)}")
-        return cost
+        return cost, result
 
 
 class ETFKlineStep(UpdateStep):
@@ -344,77 +365,103 @@ class AllWeatherUpdateStep(UpdateStep):
 
 
 class EMValUpdateStep(UpdateStep):
-    """更新两个 EMVal 模型信号，并将最新 run 同步到 SustainedBest 配置的 exp_path"""
+    """更新两个 EMVal 模型信号，并将本次新 run 同步到 SustainedBest 配置的 exp_path"""
     label = "更新 EMVal 信号 + 同步 exp_path"
 
     def execute(self, cfg: Config) -> None:
         today_str = cfg.today.isoformat()
-        for config in [cfg.emval_womom_config, cfg.emval_config]:
+        runs: dict[str, Path] = {}
+        for config, exp_name in [
+            (cfg.emval_womom_config, "em_val_all_weather_womom"),
+            (cfg.emval_config, "em_val_all_weather"),
+        ]:
             logging.info(f"  更新 {config.name} 日期 → {today_str}")
             update_yaml_dates(config, today_str)
-            run([QRUN, str(config)], cfg)
+            runs[exp_name] = new_run_after_qrun(cfg, exp_name, [QRUN, str(config)])
 
-        womom_run = latest_run_dir_for_experiment(cfg, "em_val_all_weather_womom")
-        emval_run = latest_run_dir_for_experiment(cfg, "em_val_all_weather")
-        if womom_run is None or emval_run is None:
-            raise RuntimeError(
-                f"EMVal 最新 run 未找到: womom={womom_run}, emval={emval_run}"
-            )
+        womom_run = runs["em_val_all_weather_womom"]
+        emval_run = runs["em_val_all_weather"]
 
-        # 将 SustainedBest 配置中两个 exp_path 依次替换为最新 run（绝对路径）。
-        # 注意：SustainedBest 配置中 exp_path 第一次出现对应 emval_womom，第二次对应 emval，
-        # 不能用两次 count=1 的 re.sub（第二次会再次命中第一个已替换的 exp_path），
-        # 改为用计数器按出现顺序逐个替换（re.sub 回调从左到右调用，顺序与配置一致）。
+        # 将 SustainedBest 配置中两个 exp_path 按模型名（name:）显式配对替换为最新 run（绝对路径）。
+        # 注意：不能按"出现顺序"盲目替换——配置中模型顺序为 emval → emval_womom，
+        # 之前按出现顺序会把 womom 的 run 错配给 emval（反之亦然），导致集成信号错位。
+        # 这里按 `- name: <model>` 的归属块定位 exp_path，显式保证：
+        #   emval      -> em_val_all_weather     实验的最新 run
+        #   emval_womom-> em_val_all_weather_womom 实验的最新 run
         sb = cfg.sustained_best_config
         content = sb.read_text()
-        new_paths = [str(womom_run.resolve()), str(emval_run.resolve())]
-        counter = {"i": 0}
+        emval_abs = str(emval_run.resolve())
+        womom_abs = str(womom_run.resolve())
 
-        def _swap_exp_path(m: re.Match) -> str:
-            idx = counter["i"]
-            counter["i"] += 1
-            # 防御：超出范围则保留原值（正常配置只有 2 个 exp_path）
-            replacement = new_paths[idx] if idx < len(new_paths) else m.group(2)
-            return m.group(1) + replacement + m.group(2)
+        def _swap_exp_path_named(m: re.Match) -> str:
+            # group(1)=`- name: <model>...` 前缀, group(2)=模型名,
+            # group(3)=`exp_path: "`, group(4)=旧值, group(5)=`"`
+            name = m.group(2).strip()
+            run_path = emval_abs if name == "emval" else (womom_abs if name == "emval_womom" else m.group(4))
+            return m.group(1) + m.group(3) + run_path + m.group(5)
 
-        content = re.sub(r'(exp_path:\s*")[^"]*(")', _swap_exp_path, content)
+        # 匹配 `- name: <model>` 后到下一个 `- name:` / 文件节之间的 exp_path
+        pattern = re.compile(
+            r"(- name:\s*(\w+).*?)(exp_path:\s*\")([^\"]*)(\")",
+            re.DOTALL,
+        )
+        content, n = pattern.subn(_swap_exp_path_named, content)
         sb.write_text(content)
-        logging.info(f"  SustainedBest exp_path 已更新: womom={womom_run.name}, emval={emval_run.name}")
+        logging.info(
+            f"  SustainedBest exp_path 已按模型名更新（共 {n} 个）: "
+            f"emval={emval_run.name}, emval_womom={womom_run.name}"
+        )
 
 
 class EMEnsembleBacktestStep(UpdateStep):
     """EMEnsemble (SustainedBest) 回测：生成最新持仓"""
     label = "EMEnsemble (SustainedBest) 回测"
 
-    def execute(self, cfg: Config) -> None:
+    def execute(self, cfg: Config) -> BacktestResult:
         today_str = cfg.today.isoformat()
         logging.info(f"  更新 workflow_config_all_weather_SustainedBest.yaml 日期 → {today_str}")
         update_yaml_dates(cfg.sustained_best_config, today_str)
-        run([QRUN, str(cfg.sustained_best_config)], cfg)
+        run_dir = new_run_after_qrun(
+            cfg, "em_ensemble_sustainedbest_all_weather", [QRUN, str(cfg.sustained_best_config)]
+        )
+        logging.info(f"  本次 SustainedBest 回测 run: {run_dir}")
+        return BacktestResult(run_dir=run_dir)
 
 
 class BacktestStep(UpdateStep):
     label = "HistRelaPB 回测"
 
-    def execute(self, cfg: Config) -> None:
+    def execute(self, cfg: Config) -> BacktestResult:
         today_str = cfg.today.isoformat()
         logging.info(f"  更新 workflow_config.yaml 日期 → {today_str}")
         update_yaml_dates(cfg.workflow_config, today_str)
-        run([QRUN, str(cfg.workflow_config)], cfg)
+        run_dir = new_run_after_qrun(cfg, "hist_rela_pb_etf", [QRUN, str(cfg.workflow_config)])
+        logging.info(f"  本次 HistRelaPB 回测 run: {run_dir}")
+        return BacktestResult(run_dir=run_dir)
 
 
 class SignalNotifyStep(UpdateStep):
+    """信号检测 + 通知；run 目录由上游回测步骤的结果注入，绝不扫描回退"""
     label = "信号检测 + 通知"
+
+    def __init__(
+        self,
+        hist_rela_pb_result: BacktestResult | None = None,
+        sustained_best_result: BacktestResult | None = None,
+    ) -> None:
+        self._hist_rela_pb_result = hist_rela_pb_result
+        self._sustained_best_result = sustained_best_result
 
     def execute(self, cfg: Config) -> None:
         strategies = [
-            ("HistRelaPB", "hist_rela_pb_etf"),
-            ("SustainedBest", "em_ensemble_sustainedbest_all_weather"),
+            ("HistRelaPB", self._hist_rela_pb_result),
+            ("SustainedBest", self._sustained_best_result),
         ]
-        for title, exp_name in strategies:
-            result_dir = latest_run_dir_for_experiment(cfg, exp_name)
-            result = detect_signal(result_dir)
-            self._report(title, result)
+        for title, result in strategies:
+            if result is None:
+                raise RuntimeError(f"{title} 未注入 run 目录（上游回测步骤未执行或失败）")
+            signal = detect_signal(result.run_dir)
+            self._report(title, signal)
 
     def _report(self, title: str, result: dict) -> None:
         action = result.get("action", "unknown")
@@ -467,7 +514,7 @@ class DailyUpdatePipeline:
         EMValUpdateStep(),           # EMVal 信号 + exp_path 同步
         EMEnsembleBacktestStep(),    # SustainedBest 回测
         BacktestStep(),              # HistRelaPB 回测
-        SignalNotifyStep(),          # 双策略检测通知
+        SignalNotifyStep(),          # 双策略检测通知（run 目录在 run() 中注入）
     ]
 
     def __init__(self, cfg: Config) -> None:
@@ -476,14 +523,27 @@ class DailyUpdatePipeline:
 
     def run(self) -> None:
         t_total = time.time()
+        # 前 N-1 步：数据更新 + 回测（产物即本次 qrun 的 run 目录）
+        upstream = self.STEPS[:-1]
         costs: list[float] = []
-        for i, step in enumerate(self.STEPS, start=1):
-            cost = step.run(self.cfg, f"{i}/{self.total}")
+        results: dict[str, BacktestResult] = {}
+        for i, step in enumerate(upstream, start=1):
+            cost, result = step.run(self.cfg, f"{i}/{self.total}")
             costs.append(cost)
+            if result is not None:
+                results[step.label] = result
+
+        # 依赖注入：将上游回测步骤的 run 目录显式传给信号检测步骤（不扫描、不回退）
+        notify_step = SignalNotifyStep(
+            hist_rela_pb_result=results.get("HistRelaPB 回测"),
+            sustained_best_result=results.get("EMEnsemble (SustainedBest) 回测"),
+        )
+        cost, _ = notify_step.run(self.cfg, f"{self.total}/{self.total}")
+        costs.append(cost)
 
         summary = "  |  ".join(
             f"{step.label}: {fmt_elapsed(c)}"
-            for step, c in zip(self.STEPS, costs)
+            for step, c in zip([*upstream, notify_step], costs)
         )
         logging.info(f"--- 耗时统计 ---  {summary}")
         logging.info(f"=== 日频更新完成: {self.cfg.today}，总耗时 {fmt_elapsed(time.time() - t_total)} ===")

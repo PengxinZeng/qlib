@@ -3,7 +3,7 @@ qlib_init:
     region: cn
 
 mlflow_tracking_uri: "file:./mlruns"
-experiment_name: em_ensemble_sustainedbest_all_weather
+experiment_name: em_ensemble_sustainedbest_filter_all_weather
 
 market: &market all
 benchmark: &benchmark "510300"
@@ -11,7 +11,7 @@ benchmark: &benchmark "510300"
 # 时间参数配置（取自 all_weather_data/dataset_split/split_info.json）
 time_config:
     data_start: &data_start "2012-05-28"
-    data_end: &data_end "2026-08-14"
+    data_end: &data_end "2026-08-11"
     train_start: &train_start "2012-05-28"
     train_end: &train_end "2018-04-18"
     valid_start: &valid_start "2018-04-19"
@@ -45,6 +45,8 @@ task:
         class: EMEnsembleModel
         module_path: qlib.contrib.model.em_ensemble
         kwargs:
+            # 收益率过滤：近5年年化>8% 或 成立年化>9% 保留，否则 score=-1
+            annualized_filter: {enable: true, min_5y_annualized: 0.08, min_inception_annualized: 0.10}
             # 模型列表：每个元素为 {name, interpreter}
             models:
                 - name: emval
@@ -139,26 +141,26 @@ task:
             model: <MODEL>
             dataset: <DATASET>
 
-        - class: SignalDetailRecord
-          module_path: qlib.workflow.record_temp
-          kwargs:
-            skip_existing: False
+        # - class: SignalDetailRecord
+        #   module_path: qlib.workflow.record_temp
+        #   kwargs:
+        #     skip_existing: False
 
         - class: PortAnaRecord
           module_path: qlib.workflow.record_temp
           kwargs:
             config: *port_analysis_config
 
-        - class: ReportRecord
-          module_path: qlib.workflow.record_temp
-          kwargs:
-            dataset: <DATASET>
-            freq: "1day"
-            figure_timeout: 30   # 单张图导出超时(秒)，超时跳过避免 kaleido 卡死
+        # - class: ReportRecord
+        #   module_path: qlib.workflow.record_temp
+        #   kwargs:
+        #     dataset: <DATASET>
+        #     freq: "1day"
+        #     figure_timeout: 30   # 单张图导出超时(秒)，超时跳过避免 kaleido 卡死
 
         - class: EMEnsembleChartRecord
           module_path: qlib.workflow.record_temp
           kwargs:
             dataset: <DATASET>
 
-# nohup python -u qlib/cli/run.py  examples/benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml > output/EMEnsemble_SustainedBest_TV.log 2>&1 &
+# nohup python -u qlib/cli/run.py  examples/benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest_Filter.yaml > output/EMEnsemble_SustainedBest_Filter.log 2>&1 &

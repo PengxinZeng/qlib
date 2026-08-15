@@ -14,10 +14,10 @@ configs:
   #   path: ../benchmarks/AllIn/workflow_config_all_weather_information_ratio.yaml
   # - alias: macd
   #   path: ../benchmarks/MACDSignal/workflow_config_all_weather.yaml                  # MACD 趋势择时
-  # - alias: emVal_WoMom
-  #   path: ../benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml                      # EMVal 模型
-  # - alias: emVal
-  #   path: ../benchmarks/EMVal/workflow_config_all_weather.yaml                      # EMVal 模型
+  - alias: emVal_WoMom
+    path: ../benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml                      # EMVal 模型
+  - alias: emVal
+    path: ../benchmarks/EMVal/workflow_config_all_weather.yaml                      # EMVal 模型
   # - alias: EMEnsemble
   #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather.yaml                      # EMVal 模型
   # - alias: EMEnsembleDynamicBest
@@ -50,6 +50,10 @@ regimes:
     test: ["2021-11-15", "2024-05-23"]
   B:
     test: ["2024-05-24", "2026-07-17"]
+  AB:
+    test: ["2021-11-15", "2026-07-17"]
+  ValAB:
+    test: ["2018-04-19", "2026-07-17"]
 
 # 输出目录(相对本文件)
 output_dir: results

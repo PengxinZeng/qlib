@@ -707,55 +707,33 @@ class SustainedBestSelector(BaseModelSelector):
         self.score_col = score_col
         self.follow_signal = bool(follow_signal)
 
-    def build_weight_df(self, cum_ret_df: pd.DataFrame) -> pd.DataFrame:
-        """回退实现：与 select_signal 相同的状态机，输出 one-hot 当前模型权重（兼容）。"""
-        model_names = list(cum_ret_df.columns)
-        all_index = cum_ret_df.index
-        n_models = len(model_names)
-        n = len(cum_ret_df)
-        one_hot = np.zeros((n, n_models), dtype=float)
-        current = int(cum_ret_df.values[0].argmax())
-        one_hot[0, current] = 1.0
-        cnt = np.zeros(n_models, dtype=int)
-        for t in range(1, n):
-            vals = cum_ret_df.values[t]
-            cur_v = float(vals[current])
-            for j in range(n_models):
-                if j == current:
-                    continue
-                cnt[j] = cnt[j] + 1 if vals[j] > cur_v else 0
-            hit = np.where(cnt >= self.N)[0]
-            if len(hit) > 0:
-                current = int(hit[0])
-                cnt[:] = 0
-            one_hot[t, current] = 1.0
-        return pd.DataFrame(one_hot, index=all_index, columns=model_names)
+    def _sustained_best(self, cum_ret_df: pd.DataFrame) -> pd.Series:
+        """
+        持续最优状态机（follow_signal=True / False 两分支共享的唯一实现）：
 
-    def select_signal(
-        self,
-        cum_ret_df: pd.DataFrame,
-        raw_signals: Optional[Dict[str, pd.DataFrame]] = None,
-        close: Optional[pd.Series] = None,
-    ) -> Optional[pd.Series]:
-        if raw_signals is None or close is None:
-            return None
-        if not self.follow_signal:
-            return None  # follow_signal=False -> one-hot x soft weighting
-        model_names = list(cum_ret_df.columns)
-        all_index = cum_ret_df.index
-        result = pd.Series(0.0, index=all_index, dtype=float)
+        逐股票独立运行，返回 Series(index=cum_ret_df.index, value=当日主导模型名)。
+          1. 每只股票数据首日 current = argmax(cum_ret[0])，即收益最高模型 M
+          2. 每日 t，对每个候选 J != current：
+             - 若 cum_ret[J][t] > cum_ret[current][t]，则 J 的连续优势计数 +1
+             - 否则该 J 的计数清零（中途被追回则重新累计）
+          3. 一旦某 J 的连续优势计数达 N -> current = J，所有计数清零
 
+        Parameters
+        ----------
+        cum_ret_df : pd.DataFrame
+            index=MultiIndex(datetime, instrument)，columns=model_names，值为各模型累计收益
+
+        Returns
+        -------
+        pd.Series
+            index=cum_ret_df.index，value=每行主导模型名（object）
+        """
+        model_names = list(cum_ret_df.columns)
+        best = pd.Series("", index=cum_ret_df.index, dtype=object)
         for instrument, grp in cum_ret_df.groupby(level="instrument"):
-            cum_vals = grp.values  # shape=(n_days, n_models)
-            scores = {}
-            holds = {}
-            for m in model_names:
-                sc = raw_signals[m][self.score_col].reindex(grp.index).fillna(0.0).values.astype(float)
-                scores[m] = sc
-                holds[m] = FutureBestSelector._scores_to_hold(sc)
-
+            cum_vals = grp.values  # shape=(n_days, n_models)，时间升序
             n = len(grp)
-            # 测试开始日锁定收益最高模型 M
+            # 数据首日锁定收益最高模型 M
             current = model_names[int(cum_vals[0].argmax())]
             cnt = {m: 0 for m in model_names}
             for t in range(n):
@@ -774,16 +752,59 @@ class SustainedBestSelector(BaseModelSelector):
                     current = hit[0]
                     for m in model_names:
                         cnt[m] = 0
-                # 信号规则（follow current）
-                sc_c = scores[current][t]
-                h_c = holds[current][t]
+                best.loc[grp.index[t]] = current
+        return best
+
+    def build_weight_df(self, cum_ret_df: pd.DataFrame) -> pd.DataFrame:
+        """按 _sustained_best 主导模型输出 one-hot 权重（逐股票独立，N 生效）。"""
+        model_names = list(cum_ret_df.columns)
+        best = self._sustained_best(cum_ret_df)
+        # 记录逐日主导模型，供下游输出 best_model 列
+        self._last_best_model = best
+        n = len(best)
+        col_idx = best.map({m: i for i, m in enumerate(model_names)}).to_numpy(dtype=int)
+        one_hot = np.zeros((n, len(model_names)), dtype=float)
+        one_hot[np.arange(n), col_idx] = 1.0
+        return pd.DataFrame(one_hot, index=cum_ret_df.index, columns=model_names)
+
+    def select_signal(
+        self,
+        cum_ret_df: pd.DataFrame,
+        raw_signals: Optional[Dict[str, pd.DataFrame]] = None,
+        close: Optional[pd.Series] = None,
+    ) -> Optional[pd.Series]:
+        if raw_signals is None or close is None:
+            return None
+        if not self.follow_signal:
+            return None  # follow_signal=False -> one-hot x soft weighting
+        model_names = list(cum_ret_df.columns)
+        all_index = cum_ret_df.index
+        result = pd.Series(0.0, index=all_index, dtype=float)
+        # 记录逐日主导模型（SustainedBest 当前跟随的模型名），供下游输出 best_model
+        best = self._sustained_best(cum_ret_df)
+        self._last_best_model = best
+
+        for instrument, grp in cum_ret_df.groupby(level="instrument"):
+            inst_best = best.loc[grp.index]
+            scores = {}
+            holds = {}
+            for m in model_names:
+                sc = raw_signals[m][self.score_col].reindex(grp.index).fillna(0.0).values.astype(float)
+                scores[m] = sc
+                holds[m] = FutureBestSelector._scores_to_hold(sc)
+
+            # 信号规则（follow current）
+            for t, idx in enumerate(grp.index):
+                cur_m = inst_best.iloc[t]
+                sc_c = scores[cur_m][t]
+                h_c = holds[cur_m][t]
                 if sc_c == 1.0 or sc_c == -1.0:
                     em_sig = sc_c
                 elif h_c == 1.0:
                     em_sig = 1.0
                 else:
                     em_sig = -1.0
-                result.loc[grp.index[t]] = em_sig
+                result.loc[idx] = em_sig
 
         return result
 
@@ -1129,6 +1150,11 @@ class ReturnBasedAssembler:
 
         result = pd.DataFrame({"score": final}, index=all_index)
 
+        # 3c) 当前主导模型（best_model）：由 selector 输出，下游无需重算
+        best_model = getattr(self.selector, "_last_best_model", None)
+        if best_model is not None:
+            result["best_model"] = best_model.reindex(all_index).fillna("")
+
         # 4) 附加各模型原始信号、软信号、累计收益率（供可视化分析使用）
         for name in model_names:
             result[f"{name}_score"] = raw_signals[name].sort_index()[self.score_col].astype(float).reindex(all_index).fillna(0.0)
@@ -1173,16 +1199,25 @@ class EMEnsembleModel(Model):
         assembler: dict,
         price_field: str = "close",
         lookback_days: int = 10000,
+        annualized_filter: Optional[dict] = None,
+        min_pred_coverage: float = 0.8,
     ):
         from qlib.utils import init_instance_by_config
 
         self.models = models
         self.assembler_cfg = assembler
         self.price_field = price_field
+        # 收益率过滤：{"enable": True, "min_5y_annualized": 0.08, "min_inception_annualized": 0.09}
+        # 不达标（近5年年化<=阈值 且 成立年化<=阈值）的股票，score 强制置 -1
+        self.annualized_filter = annualized_filter or {}
         # 预测时向前加载的历史数据天数：
         # - 组装器内部用含前序的完整价格计算 cum_ret（从股票数据起点复利累计）
         # - 最终输出按 segment 区间裁剪（仅保留回测区间）
         self.lookback_days = int(lookback_days)
+        # 参考模型（ValuationInterpreter）pred 数据完整性阈值：
+        # interpret() 输出 reindex 到 ensemble 运行区间（price.index）后非空行的最低比例。
+        # exp_path 指向只含部分区间的旧 run 时会触发 ValueError，防止产生全 0 信号的脏结果。
+        self.min_pred_coverage = float(min_pred_coverage)
         self.logger = get_module_logger("EMEnsembleModel", level=logging.INFO)
 
         # 初始化解释器
@@ -1223,6 +1258,55 @@ class EMEnsembleModel(Model):
             raise ValueError(f"dataset missing price field '{self.price_field}'")
         return df[[self.price_field]]
 
+    def _apply_annualized_filter(self, price, result):
+        """keep if 5y-annualized > min_5y or inception-annualized > min_incep, else score = -1"""
+        cfg = self.annualized_filter
+        if not cfg.get("enable", False):
+            return
+        min_5y = float(cfg.get("min_5y_annualized", 0.08))
+        min_incep = float(cfg.get("min_inception_annualized", 0.09))
+        min_5y_dur = float(cfg.get("min_5y_duration_days", 183))
+        min_incep_dur = float(cfg.get("min_incep_duration_days", 365))
+        close = price["close"].astype(float)
+        insts = result.index.get_level_values("instrument")
+        keep = np.zeros(len(result), dtype=bool)
+        for inst, grp in close.groupby(level="instrument"):
+            if len(grp) < 2:
+                continue
+            dates = pd.DatetimeIndex(grp.index.get_level_values("datetime")) if isinstance(grp.index, pd.MultiIndex) else pd.DatetimeIndex(grp.index)
+            vals = grp.values.astype(float)
+            n = len(vals)
+            d0 = (dates - dates[0]).days.astype(float).to_numpy()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                incep = (vals / vals[0]) ** (365.0 / d0) - 1.0
+                incep[d0 <= 0] = np.nan
+            cut = dates - pd.DateOffset(years=5)
+            idx5 = np.searchsorted(dates.values, cut.values, side="right") - 1
+            valid5 = idx5 >= 0
+            ann5 = np.full(n, np.nan)
+            if valid5.any():
+                i = valid5
+                days5 = (dates[i] - dates[idx5[i]]).days.astype(float).to_numpy()
+                ann5[i] = (vals[i] / vals[idx5[i]]) ** (365.0 / days5) - 1.0
+                ann5[i] = np.where(days5 <= 0, np.nan, ann5[i])
+            qual5 = ~np.isnan(ann5) & (ann5 > min_5y)
+            quin = ~np.isnan(incep) & (incep > min_incep)
+            dur5 = np.zeros(n)
+            dur_in = np.zeros(n)
+            for t in range(1, n):
+                dd = float((dates[t] - dates[t - 1]).days)
+                dur5[t] = dur5[t - 1] + dd if qual5[t] else 0.0
+                dur_in[t] = dur_in[t - 1] + dd if quin[t] else 0.0
+            ks = (dur5 >= min_5y_dur) | (dur_in >= min_incep_dur)
+            keep[insts == inst] = ~np.isnan(ks) & ks
+        km = keep
+        result["score"] = np.where(km, result["score"], -1.0)
+        self.logger.info(
+            "AnnualizedFilter: %d rows -> -1 (keep %.1f%%)",
+            int((~km).sum()),
+            100.0 * km.mean() if len(km) else 0.0,
+        )
+
     def predict(self, dataset: DatasetH, segment: Union[str, slice] = "test") -> pd.DataFrame:
         """
         生成最终持仓比例信号 DataFrame
@@ -1258,6 +1342,27 @@ class EMEnsembleModel(Model):
             else:
                 # ValuationInterpreter：从 exp_path 加载 pred.pkl
                 soft = interp.interpret()
+            # 参考模型数据完整性检查：exp_path 指向的 pred 必须覆盖 ensemble 运行区间。
+            # 若只含部分区间（如 daily_update 误指向仅含后半段的 run），reindex 后大量行
+            # 被 fillna(0.0) 填充，导致 {name}_score 几乎全 0 的脏结果，这里直接 raise。
+            if not isinstance(interp, (ConstantInterpreter, MACDSignalInterpreter)):
+                aligned = soft[interp.score_col].reindex(price.index)
+                coverage = float(aligned.notna().mean())
+                exp_path = getattr(interp, "exp_path", "N/A")
+                if coverage < self.min_pred_coverage:
+                    raise ValueError(
+                        f"[EMEnsembleModel] 参考模型 '{name}' (exp_path={exp_path}) 数据不完整："
+                        f"pred 覆盖 ensemble 运行区间的比例仅 {coverage:.2%} "
+                        f"(阈值 {self.min_pred_coverage:.0%})。"
+                        f"pred 区间无法覆盖回测区间，reindex 后会产生大量 0 信号，"
+                        f"请检查 exp_path 是否指向包含完整历史区间的最新 run。"
+                    )
+                self.logger.info(
+                    "Model '%s' pred coverage on ensemble range: %.2f%% (exp_path=%s)",
+                    name,
+                    coverage * 100.0,
+                    exp_path,
+                )
             soft_signals[name] = soft[["soft_signal"]]
             # 原始信号（score）用于组装器算收益
             raw_signals[name] = soft[[interp.score_col]]
@@ -1269,6 +1374,9 @@ class EMEnsembleModel(Model):
             raw_signals=raw_signals,
             price=price,
         )
+
+        # 2.5) 收益率过滤（近5年年化>8% 或 成立年化>9% 保留，否则 score=-1）
+        self._apply_annualized_filter(price, result)
 
         # 3) 将输出裁剪到 segment 区间（去除前序 lookback 数据）
         #    - 组装器内部已用含前序的全量价格计算 cum_ret（从股票数据起点复利累计）

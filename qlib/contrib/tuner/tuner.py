@@ -398,7 +398,17 @@ class WorkflowConfigTuner(Tuner):
 
         model_params = params.get("model_space", {})
         strategy_params = params.get("strategy_space", {})
-        workflow_config["task"]["model"].setdefault("kwargs", {}).update(model_params)
+        # 支持点分路径键：`assembler.kwargs.selector.kwargs.N` 递归注入深层嵌套的 model kwargs；
+        # 普通键（如 `fast`、`lookback_days`）沿用原拍平注入到 model.kwargs。
+        for k, v in model_params.items():
+            if "." in str(k):
+                target = workflow_config["task"]["model"].setdefault("kwargs", {})
+                parts = str(k).split(".")
+                for p in parts[:-1]:
+                    target = target.setdefault(p, {})
+                target[parts[-1]] = v
+            else:
+                workflow_config["task"]["model"].setdefault("kwargs", {}).update({k: v})
         self._update_port_analysis_strategy(workflow_config, strategy_params)
 
         os.makedirs(self.ex_dir, exist_ok=True)

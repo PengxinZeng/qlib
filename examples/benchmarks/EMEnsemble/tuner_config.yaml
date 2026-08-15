@@ -1,0 +1,41 @@
+experiment:
+    name: em_ensemble_sustainedbest_tuner
+    dir: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMEnsemble/tuner_results
+    tuner_class: WorkflowConfigTuner
+    tuner_module_path: qlib.contrib.tuner.tuner
+
+optimization_criteria:
+    report_type: return_with_cost
+    report_factor: annualized_return
+    optim_type: max
+
+tuner_pipeline:
+  - workflow_config_path: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml
+    workflow_experiment_name: em_ensemble_sustainedbest_all_weather
+    analysis_freq: 1day
+    model:
+        # 搜索空间：EMEnsemble SustainedBest 的可调参数（N、follow_signal）
+        # follow_signal 固定 False（one-hot × soft 加权）；N 由下方 initial_params 幂序列全量扫描
+        space: EMEnsembleSustainedBestModelSpace
+    strategy:
+        space: EvenWeightStrategySpace
+    trainer: {}
+    # 只跑 initial_params 人工幂序列（N: 64,128,256,...,2048），不做 TPE 随机搜索
+    max_evals: 0
+    # N 按 2 的幂扫描 [64, 128, 256, 512, 1024, 2048]，follow_signal 固定 false。
+    # follow_signal=false 时 SustainedBestSelector 走 one-hot × soft 加权，
+    # N 决定 build_weight_df 的持续切换频率（连续领先 N 天才切换 one-hot 权重）。
+    initial_params:
+      - model_space:
+          assembler.kwargs.selector.kwargs.N: 64
+          assembler.kwargs.selector.kwargs.follow_signal: true
+      - model_space:
+          assembler.kwargs.selector.kwargs.N: 128
+          assembler.kwargs.selector.kwargs.follow_signal: true
+
+time_period: {}
+data: {}
+backtest: {}
+qlib_client: {}
+
+# nohup python -u qlib/contrib/tuner/launcher.py -c examples/benchmarks/EMEnsemble/tuner_config.yaml > output/_tuner_ensb_config.log 2>&1 &

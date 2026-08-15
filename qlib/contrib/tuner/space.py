@@ -39,6 +39,18 @@ EvenWeightStrategySpace = {
     "max_stock_weight": 1.0,
 }
 
+EMEnsembleSustainedBestModelSpace = {
+    # 持续最优切换阈值 N：连续领先 N 个交易日才切换当前主导模型的 one-hot 权重。
+    # 用户指定按 2 的幂序列扫描 [64, 128, 256, 512, 1024, 2048]：
+    #   - N=64    ≈ 快速切换（领先约 3 个月即切换）
+    #   - N=2048  在 2306 天回测区间内 ≈ 几乎不切换（≈ LockedBest）
+    # 由于整段扫描用人工 initial_params 逐组执行，space 只保留单点默认值供 TPE 兜底；
+    # 主搜索由 tuner_config.yaml 的 initial_params 幂序列驱动（max_evals=0 时只跑序列）。
+    "assembler.kwargs.selector.kwargs.N": hp.quniform("emsb_N", 64, 2048, 1),
+    # 是否跟随当前模型的原始信号：固定 False（SustainedBestSelector 走 one-hot × soft 加权），不参与搜索
+    "assembler.kwargs.selector.kwargs.follow_signal": False,
+}
+
 MACDSignalModelSpace = {
     # 快线 EMA 周期 [5, 20]，步长 1
     "fast": hp.quniform("macd_fast", 5, 20, 1),
