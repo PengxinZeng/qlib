@@ -505,20 +505,23 @@ class SignalNotifyStep(UpdateStep):
 # ---------------------------------------------------------------------------
 
 class DailyUpdatePipeline:
-    STEPS: list[UpdateStep] = [
+    DATA_STEPS: list[UpdateStep] = [
         ETFKlineStep(),
         IndexValuationStep(),
         BondRateStep(),
         MergeConvertStep(),
         AllWeatherUpdateStep(),      # all_weather 数据增量更新
+    ]
+    MODEL_STEPS: list[UpdateStep] = [
         EMValUpdateStep(),           # EMVal 信号 + exp_path 同步
         EMEnsembleBacktestStep(),    # SustainedBest 回测
         BacktestStep(),              # HistRelaPB 回测
         SignalNotifyStep(),          # 双策略检测通知（run 目录在 run() 中注入）
     ]
 
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, models_only: bool = False) -> None:
         self.cfg = cfg
+        self.STEPS = self.MODEL_STEPS if models_only else [*self.DATA_STEPS, *self.MODEL_STEPS]
         self.total = len(self.STEPS)
 
     def run(self) -> None:
@@ -571,19 +574,21 @@ def main() -> None:
     parser.add_argument("--symbols", type=str, default=None, help="逗号分隔的 ETF 代码，如 510050；不指定则全量")
     parser.add_argument("--force", action="store_true", help="忽略交易日判断，强制运行")
     parser.add_argument("--max_index_retries", type=int, default=0, help="指数估值最大重试次数，0=无限（默认）")
+    parser.add_argument("--models_only", action="store_true",
+                        help="仅重跑模型链（EMVal→SustainedBest→HistRelaPB→信号检测），跳过数据下载/数据链更新")
     args = parser.parse_args()
 
     cfg = Config(symbols=args.symbols, max_index_retries=args.max_index_retries)
     _setup_logging(cfg)
 
-    if not args.force and not is_trading_day(cfg):
+    if not args.force and not args.models_only and not is_trading_day(cfg):
         logging.info(f"{cfg.today} 非交易日，跳过（--force 可强制运行）")
         return
 
-    scope = f"[symbols={cfg.symbols}]" if cfg.symbols else "[全量]"
+    scope = "[models_only]" if args.models_only else (f"[symbols={cfg.symbols}]" if cfg.symbols else "[全量]")
     logging.info(f"=== 日频更新开始: {cfg.today} {scope} ===")
 
-    DailyUpdatePipeline(cfg).run()
+    DailyUpdatePipeline(cfg, models_only=args.models_only).run()
 
 
 if __name__ == "__main__":

@@ -3,12 +3,10 @@ qlib_init:
     region: cn
 
 mlflow_tracking_uri: "file:./mlruns"
-experiment_name: em_val_all_weather_womom
+experiment_name: linear_all_weather
 
 market: &market all
 benchmark: &benchmark "510300"
-buy_rank_thre: &buy_rank_thre 0.07
-sell_rank_thre: &sell_rank_thre 0.94
 
 # 时间参数配置（取自 all_weather_data/dataset_split/split_info.json）
 time_config:
@@ -21,14 +19,15 @@ time_config:
     backtest_start: &backtest_start "2012-05-28"
     backtest_end: &backtest_end "2026-08-15"
 
+# 回测配置
 port_analysis_config: &port_analysis_config
     strategy:
-        class: EvenWeightStrategy
-        module_path: qlib.contrib.strategy.signal_strategy
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy
         kwargs:
             signal: <PRED>
-            risk_degree: 1.0
-            max_stock_weight: 1.0
+            topk: 10
+            n_drop: 2
     backtest:
         start_time: *backtest_start
         end_time: *backtest_end
@@ -42,19 +41,13 @@ port_analysis_config: &port_analysis_config
             min_cost: 5
             trade_unit: 0.0001
 
+# 任务配置
 task:
     model:
-        class: EMValModel
-        module_path: qlib.contrib.model.em_val
+        class: LinearModel
+        module_path: qlib.contrib.model.linear
         kwargs:
-            fast: 17
-            mid: 23
-            slow: 5302.0
-            Nt: 1613.0
-            epsilon: null
-            min_valid_days_ratio: 0.30   # 最小有效数据天数 = int(lookback_days * ratio)
-            buy_rank_thre: *buy_rank_thre
-            sell_rank_thre: *sell_rank_thre
+            estimator: ols
 
     dataset:
         class: DatasetH
@@ -70,13 +63,14 @@ task:
                     fit_end_time: *train_end
                     instruments: *market
                     # all_weather_data 仅 dump 了 OHLCV 字段
+                    # label 由 RawFieldsHandler 默认配置生成: Ref($close, -2)/Ref($close, -1) - 1
                     fields:
                         - "$close"
                         - "$volume"
                     field_names:
                         - "close"
                         - "volume"
-                    # OHLCV 无 inf、MACD 自行处理 NaN，故不需要 processor
+                    # OHLCV 无 inf、Linear 内部自行 dropna，故不需要 processor
                     infer_processors: []
                     learn_processors: []
             segments:
@@ -90,6 +84,12 @@ task:
           kwargs:
             model: <MODEL>
             dataset: <DATASET>
+
+        - class: SigAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+            ana_long_short: True
+            ann_scaler: 252
 
         - class: SignalDetailRecord
           module_path: qlib.workflow.record_temp
@@ -108,11 +108,4 @@ task:
             freq: "1day"
             figure_timeout: 30   # 单张图导出超时(秒)，超时跳过避免 kaleido 卡死
 
-        - class: EMValChartRecord
-          module_path: qlib.workflow.record_temp
-          kwargs:
-            dataset: <DATASET>
-            buy_rank_thre: *buy_rank_thre
-            sell_rank_thre: *sell_rank_thre
-
-# nohup python -u qlib/cli/run.py  examples/benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml > output/EMval_WoMom_Test.log 2>&1 &
+# nohup python -u qlib/cli/run.py examples/benchmarks/Linear/workflow_config_linear_all_weather.yaml > output/Linear_all_weather.log 2>&1 &
