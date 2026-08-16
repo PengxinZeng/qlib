@@ -26,16 +26,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 import qlib
 from qlib.data import D
 
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
+
 # 纯绘图函数复用自 plot_lib（无副作用），供本 CLI 与 pipeline 的 EtfVisualizer 共用
 from plot_lib import get_fund_display_name, plot_aligned_etf, plot_subplots_etf
 
 # 路径配置
-DATA_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond")
+DATA_DIR = path_config.QLIB_DATA_DIR
 OUTPUT_DIR = DATA_DIR / "data_distribution" / "AllETF"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # 基金名称映射
-FUNDS_LIST_CSV = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/source/funds_list.csv")
+FUNDS_LIST_CSV = path_config.FUNDS_LIST
 
 
 def load_fund_names():

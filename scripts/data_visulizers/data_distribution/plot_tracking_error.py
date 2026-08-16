@@ -16,13 +16,18 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
+import sys
+
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
 # 路径配置
-QLIB_BASE  = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415")
+QLIB_BASE  = path_config.QLIB_BASE
 MERGED_DIR = QLIB_BASE / "source" / "etf_index" / "merged"
 REPORT_DIR = QLIB_BASE / "qlib_etf_index_Extend_wBond" / "data_distribution" / "TrackingError"
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -31,7 +36,7 @@ REPORT_DIR.mkdir(parents=True, exist_ok=True)
 def get_fund_name(fund_code: str) -> str:
     """从funds_list.csv获取基金名称"""
     try:
-        funds_list = pd.read_csv("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/source/funds_list.csv")
+        funds_list = pd.read_csv(path_config.FUNDS_LIST)
         fund_info = funds_list[funds_list['fund_code'] == fund_code]
         if not fund_info.empty:
             return fund_info.iloc[0]['fund_name']

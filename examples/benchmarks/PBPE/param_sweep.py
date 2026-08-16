@@ -14,7 +14,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 import qlib
 from qlib.data import D
 
-DATA_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index")
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+import path_config  # noqa: E402
+
+DATA_DIR = path_config.QLIB_BASE / "qlib_etf_index"
 OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 

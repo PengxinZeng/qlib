@@ -1,5 +1,5 @@
 qlib_init:
-    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond"
+    provider_uri: "{{ QLIB_DATA_BASE | default('/Users/zengpengxin/workspace/DataBase/Quant/QlibBase') }}/qlib_data_260415/qlib_etf_index_Extend_wBond"
     region: cn
 
 mlflow_tracking_uri: "file:./mlruns"

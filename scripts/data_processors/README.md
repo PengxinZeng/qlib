@@ -139,14 +139,14 @@ qlib_data_260415/qlib_etf_index_Extend_wBond/
 
 **启动命令**:
 ```bash
-conda activate rdagent
-# 使用默认路径（推荐）
+conda activate rdagent   # macOS；Windows 用 conda activate qlib
+# 使用默认路径（推荐；默认路径由 scripts/path_config.py 跨平台解析）
 python scripts/data_processors/merge_etf_val/dump_etf_index.py convert
 
-# 或指定路径
+# 或指定路径（<DATA_BASE> 见 scripts/path_config.py）
 python scripts/data_processors/merge_etf_val/dump_etf_index.py convert \
-    --data_path /Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/source/etf_index/merged \
-    --qlib_dir /Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond \
+    --data_path <DATA_BASE>/qlib_data_260415/source/etf_index/merged \
+    --qlib_dir <DATA_BASE>/qlib_data_260415/qlib_etf_index_Extend_wBond \
     --freq day \
     --max_workers 16
 ```

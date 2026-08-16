@@ -7,22 +7,27 @@ Baostock 存款利率数据采集器
 使用 baostock 的 query_deposit_rate_data 接口获取存款利率数据
 
 使用方法:
-    # 下载存款利率数据
+    # 下载存款利率数据（save_dir 默认 <DATA_BASE>/qlib_data_test11，见 scripts/path_config.py）
     python collector.py download_deposit_rate \
-        --save_dir /Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_test11
+        --save_dir <DATA_BASE>/qlib_data_test11
 
     # 指定日期范围
     python collector.py download_deposit_rate \
-        --save_dir /Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_test11 \
+        --save_dir <DATA_BASE>/qlib_data_test11 \
         --start 2010-01-01 \
         --end 2026-04-15
 """
 
+import sys
 import fire
 import pandas as pd
 import baostock as bs
 from pathlib import Path
 from loguru import logger
+
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
 
 
 class BaostockDepositRateCollector:
@@ -156,7 +161,7 @@ class Run:
         save_dir: str
             数据保存目录
         """
-        self.save_dir = save_dir or "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_test11"
+        self.save_dir = save_dir or str(path_config.DATA_BASE / "qlib_data_test11")
 
     def download_deposit_rate(
         self,

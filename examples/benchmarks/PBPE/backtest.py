@@ -1,8 +1,8 @@
 """
 PB/PE 价值投资策略回测脚本
 使用方法:
-    cd /Users/zengpengxin/workspace/CodeBase/qlib
-    source activate rdagent
+    cd <仓库根>   # 仓库根见 scripts/path_config.py
+    conda activate rdagent    # macOS；Windows 用 conda activate qlib
     python examples/benchmarks/PBPE/backtest.py
 """
 
@@ -18,6 +18,10 @@ from qlib.utils import init_instance_by_config
 from qlib.workflow import R
 from qlib.utils.file import remove_date_suffix_in_dir
 
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+import path_config  # noqa: E402
+
 # 配置文件路径
 STRATEGY_DIR = Path(__file__).parent
 CONFIG_FILE = STRATEGY_DIR / "workflow_config_pbpe.yaml"
@@ -26,7 +30,7 @@ CONFIG_FILE = STRATEGY_DIR / "workflow_config_pbpe.yaml"
 def init_qlib():
     """初始化qlib"""
     qlib.init(
-        provider_uri="/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index",
+        provider_uri=str(path_config.QLIB_BASE / "qlib_etf_index"),
         region="cn"
     )
 
@@ -141,7 +145,7 @@ def main():
     print("PB/PE 价值投资策略回测")
     print("=" * 60)
     print(f"配置文件: {CONFIG_FILE}")
-    print(f"数据目录: /Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index")
+    print(f"数据目录: {path_config.QLIB_BASE / 'qlib_etf_index'}")
     print()
 
     try:

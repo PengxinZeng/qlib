@@ -21,7 +21,11 @@ mpl.rcParams["font.family"] = ["PingFang HK", "STHeiti", "Arial Unicode MS", "sa
 mpl.rcParams["axes.unicode_minus"] = False
 
 # ── 路径配置 ──────────────────────────────────────────────────────────────────
-BASE = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415")
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
+
+BASE = path_config.QLIB_BASE
 BOND_CSV   = BASE / "source/cn_bond_rate/cn_bond_yield.csv"
 QLIB_DIR   = BASE / "qlib_etf_index_Extend_wBond"
 OUTPUT_DIR = BASE / "qlib_etf_index_Extend_wBond/data_distribution/BondVsETF"

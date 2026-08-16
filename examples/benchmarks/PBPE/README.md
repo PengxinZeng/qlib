@@ -6,7 +6,7 @@
 基于市盈率(PE)和市净率(PB)的基本面价值投资策略。选取低估值ETF基金进行长期持有，在估值偏高时卖出。
 
 ### 1.2 数据基础
-- **数据目录**: `/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index`
+- **数据目录**: `<DATA_BASE>/qlib_data_260415/qlib_etf_index`（DATA_BASE 见 scripts/path_config.py）
 - **基金数量**: 18只ETF指数基金
 - **日期范围**: 2005-02-23 ~ 2026-04-13
 - **可交易股票数**: 最多18只，最少12只

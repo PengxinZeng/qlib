@@ -16,13 +16,15 @@ from pathlib import Path
 from tqdm import tqdm
 from loguru import logger
 
-# 添加路径
-sys.path.append('/Users/zengpengxin/workspace/CodeBase/qlib/scripts')
+# 添加路径（path_config 集中管理，跨平台）
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent.parent))  # scripts/
+import path_config  # noqa: E402
 from data_collector.tencent_etf.collector import TencentETFCollector
 
 # 配置
-BASE_DIR = Path('/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/stock_data')
-FUNDS_LIST = '/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/source/funds_list.csv'
+BASE_DIR = path_config.DATA_BASE / 'stock_data'
+FUNDS_LIST = str(path_config.FUNDS_LIST)
 HFQ_DIR = BASE_DIR / 'fund_kline_hfq'
 RAW_DIR = BASE_DIR / 'fund_kline_raw'
 

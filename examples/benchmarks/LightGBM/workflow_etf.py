@@ -16,11 +16,13 @@ Usage:
 """
 
 import os
+import sys
 import fire
 import pandas as pd
 import qlib
 import yaml
 import plotly.graph_objects as go
+from pathlib import Path
 from qlib.utils import init_instance_by_config, flatten_dict
 from qlib.workflow import R
 from qlib.workflow.record_temp import SignalRecord, PortAnaRecord, SigAnaRecord
@@ -29,8 +31,12 @@ from qlib.workflow.record_temp import SignalRecord, PortAnaRecord, SigAnaRecord
 # 默认配置路径
 DEFAULT_CONFIG = "examples/benchmarks/LightGBM/workflow_config_lightgbm_etf.yaml"
 
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+import path_config  # noqa: E402
+
 # 标的信息路径
-INSTRUMENT_INFO_PATH = "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_data/instruments/instrument_info.csv"
+INSTRUMENT_INFO_PATH = str(path_config.QLIB_BASE / "qlib_data" / "instruments" / "instrument_info.csv")
 
 # 颜色配置
 COLORS = [

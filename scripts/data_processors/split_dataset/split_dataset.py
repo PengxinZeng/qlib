@@ -24,8 +24,12 @@ import json
 sys.path.insert(0, str(Path(__file__).parent))
 from split_lib import split_by_cumsum, build_results, plot_split
 
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
+
 # 路径配置
-QLIB_DIR = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index")
+QLIB_DIR = path_config.QLIB_BASE / "qlib_etf_index"
 OUTPUT_DIR = QLIB_DIR / "dataset_split"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

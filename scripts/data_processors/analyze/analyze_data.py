@@ -1,17 +1,22 @@
 """
 数据质量分析报告
 """
+import sys
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
+
 # 配置
-BASE_DIR = Path('/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/stock_data')
+BASE_DIR = path_config.DATA_BASE / 'stock_data'
 MERGED_DIR = BASE_DIR / 'merged'
 HFQ_DIR = BASE_DIR / 'fund_kline_hfq'
 RAW_DIR = BASE_DIR / 'fund_kline_raw'
 REPORT_DIR = BASE_DIR / 'report'
-FUNDS_LIST = '/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/source/funds_list.csv'
+FUNDS_LIST = str(path_config.FUNDS_LIST)
 
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 

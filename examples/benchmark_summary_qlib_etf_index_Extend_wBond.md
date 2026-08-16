@@ -4,7 +4,7 @@
 
 ### 数据路径
 ```
-/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond
+7:<DATA_BASE>/qlib_data_260415/qlib_etf_index_Extend_wBond
 ```
 
 ### 数据构成

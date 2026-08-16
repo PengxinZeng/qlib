@@ -15,16 +15,21 @@ annualized_* ：成立/近 N 年年化收益率，不满年限置空（对齐 re
   python scripts/export_holdings.py --out <p>       # 指定输出
 """
 import argparse
+import sys
 import yaml
 from pathlib import Path
 
 import pandas as pd
 
-QLIB_ROOT = Path("/Users/zengpengxin/workspace/CodeBase/qlib")
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import path_config  # noqa: E402
+
+QLIB_ROOT = path_config.QLIB_ROOT
 MLRUNS = QLIB_ROOT / "mlruns"
 PIPELINE_YAML = QLIB_ROOT / "scripts" / "data_pipline" / "pipeline.yaml"
 EXPERIMENT_NAME = "em_ensemble_sustainedbest_all_weather"
-ALL_WEATHER_BASE = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data")
+ALL_WEATHER_BASE = path_config.ALL_WEATHER_BASE
 CLEANED_DIR = ALL_WEATHER_BASE / "cleaned"
 YEARS = (1, 3, 5, 10)
 

@@ -15,20 +15,19 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib as mpl
 from pathlib import Path
+import sys
+
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
 
 # 中文字体配置
 mpl.rcParams["font.family"] = ["PingFang HK", "STHeiti", "Arial Unicode MS", "sans-serif"]
 mpl.rcParams["axes.unicode_minus"] = False
 
 # ── 路径配置 ──────────────────────────────────────────────────────────────────
-DATA_PATH = Path(
-    "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase"
-    "/qlib_data_260415/source/cn_bond_rate/cn_bond_yield.csv"
-)
-OUTPUT_DIR = Path(
-    "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase"
-    "/qlib_data_260415/qlib_etf_index_Extend_wBond/data_distribution/BondYield"
-)
+DATA_PATH = path_config.BOND_FILE
+OUTPUT_DIR = path_config.QLIB_DATA_DIR / "data_distribution" / "BondYield"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── 曲线配置：(列名, 显示名称, 颜色, 线型) ────────────────────────────────────

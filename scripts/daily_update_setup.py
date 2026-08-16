@@ -2,6 +2,9 @@
 """
 一次性安装脚本：注册 launchd 定时任务，每天 15:35 自动运行日频更新。
 
+⚠️ macOS 专属（依赖 launchctl / LaunchAgents）。Windows 请改用任务计划程序
+（schtasks）直接调度 `python scripts/daily_update.py`，路径由 path_config 解析。
+
 用法:
   python scripts/daily_update_setup.py install    # 安装
   python scripts/daily_update_setup.py uninstall  # 卸载
@@ -14,6 +17,7 @@ from pathlib import Path
 LABEL = "com.qlib.daily-update"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
+# macOS 专属：固定本机路径（Windows 不使用本脚本）
 QLIB_ROOT = Path("/Users/zengpengxin/workspace/CodeBase/qlib")
 PYTHON = "/Users/zengpengxin/miniconda3/envs/rdagent/bin/python"
 SCRIPT = str(QLIB_ROOT / "scripts" / "daily_update.py")

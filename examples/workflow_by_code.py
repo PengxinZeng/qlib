@@ -2,14 +2,16 @@
 # Licensed under the MIT License.
 
 import os
+import sys
 import fire
 import pandas as pd
 import qlib
+from pathlib import Path
 from qlib.utils import init_instance_by_config
 from qlib.workflow import R
 from qlib.contrib.report import analysis_model, analysis_position
 import qlib.cli.run
-from qlib.workflow.record_temp import SignalRecord, PortAnaRecord, SigAnaRecord
+from qlib.workflow.record_temp import SignalRecord, PortAnaRecord, SigAnaRecord, _artifact_dir
 
 
 def draw_analysis_figures(recorder_id, experiment_id, dataset):
@@ -24,8 +26,8 @@ def draw_analysis_figures(recorder_id, experiment_id, dataset):
     positions = recorder.load_object("portfolio_analysis/positions_normal_1day.pkl")
     analysis_df = recorder.load_object("portfolio_analysis/port_analysis_1day.pkl")
 
-    # 使用recorder的artifact_uri获取正确路径
-    artifact_uri = str(recorder.artifact_uri).replace('file://', '')
+    # 使用recorder的artifact_uri获取正确路径（跨平台，见 record_temp._artifact_dir）
+    artifact_uri = _artifact_dir(recorder)
     save_root = os.path.join(artifact_uri, "analysis_csvs")
     os.makedirs(save_root, exist_ok=True)
 
@@ -144,8 +146,9 @@ def analyze_existing_results(config_path, recorder_id, experiment_id):
     else:
         from qlib.config import C
         exp_manager = C["exp_manager"]
-        # 使用实际的mlruns路径
-        mlruns_uri = "file:///Users/zengpengxin/workspace/CodeBase/qlib/mlruns"
+        # 使用实际mlruns路径（仓库根，跨平台）
+        mlruns_dir = Path(__file__).resolve().parents[1] / "mlruns"
+        mlruns_uri = "file:" + mlruns_dir.as_posix()
         exp_manager["kwargs"]["uri"] = mlruns_uri
         qlib.init(**config.get("qlib_init"), exp_manager=exp_manager)
         print(f"MLflow tracking URI: {mlruns_uri}")

@@ -106,13 +106,16 @@ python scripts/check_data_health.py check_data --qlib_dir ~/.qlib/qlib_data/gold
 python qlib/cli/run.py examples/benchmarks/HistRelaPB/workflow_config.yaml
 # 训练结果保存在mlruns/<experiment_id>/<recorder_id>/; 
 # 其中experiment_id，recorder_id在训练日志中
+# （provider_uri 支持环境变量渲染：设置 QLIB_DATA_BASE 可切换数据根，见 path_config.py）
 
-cd /Users/zengpengxin/workspace/CodeBase/qlib && conda activate rdagent && python qlib/cli/run.py examples/benchmarks/HistRelaPB/workflow_config.yaml
+# macOS 一键示例
+cd <仓库根> && conda activate rdagent && python qlib/cli/run.py examples/benchmarks/HistRelaPB/workflow_config.yaml
 ```
 
 ## Tuner
 ```
-python qlib/contrib/tuner/launcher.py -c /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/HistRelaPB/tuner_config.yaml
+# 需在仓库根运行（tuner_config.yaml 使用相对路径）
+python qlib/contrib/tuner/launcher.py -c examples/benchmarks/HistRelaPB/tuner_config.yaml
 ```
 
 ## 查看实验结果

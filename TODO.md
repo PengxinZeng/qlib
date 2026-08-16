@@ -106,7 +106,7 @@ python -u qlib/cli/run.py examples/benchmarks/MACDSignal/workflow_config_all_wea
 
 ```
 实现MACD策略：
-1. 在/Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks新增文件目录实现策略；
+1. 在 <仓库根>/examples/benchmarks 新增文件目录实现策略；
 2. 策略逻辑是：根据MACD选择买卖点；根据最终总收益选股
 3. 数据集配置参考examples/benchmarks/LightGBM/workflow_config_lightgbm_etf.yaml
 4. 在训练集中训练模型并保存训练日志、模型参数；在VAL set中调优参数

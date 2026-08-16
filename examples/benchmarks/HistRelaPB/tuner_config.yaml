@@ -1,6 +1,6 @@
 experiment:
     name: hist_rela_pb_tuner
-    dir: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/HistRelaPB/tuner_results
+    dir: examples/benchmarks/HistRelaPB/tuner_results
     tuner_class: WorkflowConfigTuner
     tuner_module_path: qlib.contrib.tuner.tuner
 
@@ -10,7 +10,7 @@ optimization_criteria:
     optim_type: max
 
 tuner_pipeline:
-  - workflow_config_path: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/HistRelaPB/workflow_config.yaml
+  - workflow_config_path: examples/benchmarks/HistRelaPB/workflow_config.yaml
     workflow_experiment_name: hist_rela_pb_etf
     analysis_freq: 1day
     model:

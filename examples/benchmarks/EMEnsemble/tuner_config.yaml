@@ -1,6 +1,6 @@
 experiment:
     name: em_ensemble_sustainedbest_tuner
-    dir: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMEnsemble/tuner_results
+    dir: examples/benchmarks/EMEnsemble/tuner_results
     tuner_class: WorkflowConfigTuner
     tuner_module_path: qlib.contrib.tuner.tuner
 
@@ -10,7 +10,7 @@ optimization_criteria:
     optim_type: max
 
 tuner_pipeline:
-  - workflow_config_path: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml
+  - workflow_config_path: examples/benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml
     workflow_experiment_name: em_ensemble_sustainedbest_all_weather
     analysis_freq: 1day
     model:

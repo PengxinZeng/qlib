@@ -1,6 +1,6 @@
 experiment:
     name: em_val_tuner
-    dir: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMVal/tuner_results
+    dir: examples/benchmarks/EMVal/tuner_results
     tuner_class: WorkflowConfigTuner
     tuner_module_path: qlib.contrib.tuner.tuner
 
@@ -10,7 +10,7 @@ optimization_criteria:
     optim_type: max
 
 tuner_pipeline:
-  - workflow_config_path: /Users/zengpengxin/workspace/CodeBase/qlib/examples/benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml
+  - workflow_config_path: examples/benchmarks/EMVal/workflow_config_all_weather_WoMom.yaml
     workflow_experiment_name: em_val_all_weather
     analysis_freq: 1day
     model:

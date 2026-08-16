@@ -1,5 +1,5 @@
 qlib_init:
-    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data/qlib_all_weather"
+    provider_uri: "{{ QLIB_DATA_BASE | default('/Users/zengpengxin/workspace/DataBase/Quant/QlibBase') }}/all_weather_data/qlib_all_weather"
     region: cn
 
 mlflow_tracking_uri: "file:./mlruns"
@@ -52,7 +52,7 @@ task:
                       class: ValuationInterpreter
                       module_path: qlib.contrib.model.em_ensemble
                       kwargs:
-                          exp_path: "/Users/zengpengxin/workspace/CodeBase/qlib/mlruns/264173616341034074/4fc3a7677d58403f870ebdb1166ed2a9"
+                          exp_path: "{{ QLIB_REPO_ROOT | default('/Users/zengpengxin/workspace/CodeBase/qlib') }}/mlruns/264173616341034074/4fc3a7677d58403f870ebdb1166ed2a9"
                           buy_rank_thre: 0.07
                           sell_rank_thre: 0.94
                           min_buy_days: 5
@@ -62,7 +62,7 @@ task:
                       class: ValuationInterpreter
                       module_path: qlib.contrib.model.em_ensemble
                       kwargs:
-                          exp_path: "/Users/zengpengxin/workspace/CodeBase/qlib/mlruns/264173616341034074/7e4640b19d714b9c893c553e90c99428"
+                          exp_path: "{{ QLIB_REPO_ROOT | default('/Users/zengpengxin/workspace/CodeBase/qlib') }}/mlruns/264173616341034074/7e4640b19d714b9c893c553e90c99428"
                           buy_rank_thre: 0.32
                           sell_rank_thre: 0.88
                           min_buy_days: 5

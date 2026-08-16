@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """日频更新入口：每个交易日收盘后运行
 用法:
-  /Users/zengpengxin/miniconda3/envs/rdagent/bin/python scripts/daily_update.py          # 全量
-  /Users/zengpengxin/miniconda3/envs/rdagent/bin/python scripts/daily_update.py --symbols 510050  # 单只测试
-  python scripts/daily_update.py --force            # 忽略交易日检查
+  python scripts/daily_update.py                                  # 全量
+  python scripts/daily_update.py --symbols 510050                 # 单只测试
+  python scripts/daily_update.py --force                          # 忽略交易日检查
+  python scripts/daily_update.py --models_only                    # 仅模型链
+（解释器/数据根由 scripts/path_config.py 跨平台解析，见 Usage.md）
 """
 import argparse
 import logging
@@ -580,7 +582,8 @@ def _setup_logging(cfg: Config) -> None:
         level=logging.INFO,
         format="%(asctime)s %(message)s",
         handlers=[
-            logging.FileHandler(log_dir / f"{cfg.today}.log"),
+            # Windows 上 FileHandler 默认用 GBK 写文件会导致中文乱码，显式 UTF-8
+            logging.FileHandler(log_dir / f"{cfg.today}.log", encoding="utf-8"),
             logging.StreamHandler(),
         ],
     )

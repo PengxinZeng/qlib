@@ -10,12 +10,17 @@
 import argparse
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
 import requests
+
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
 
 
 def _call_with_retry(func: Callable[..., Any], *args: Any, retry: int = 3, **kwargs: Any) -> Any:
@@ -322,7 +327,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Download fund historical K-line data with dividend adjustment")
     parser.add_argument("--symbols", type=str, default=None, help="Fund codes, comma separated (e.g., 510300,159915)")
     parser.add_argument("--save_dir", type=str, default=str(Path(__file__).resolve().parent / "source"))
-    parser.add_argument("--funds_list", type=str, default="/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_test11/funds_list.csv")
+    parser.add_argument("--funds_list", type=str, default=str(path_config.DATA_BASE / "qlib_data_test11" / "funds_list.csv"))
     parser.add_argument("--datalen", type=int, default=9999, help="Number of data points to fetch (default: 9999)")
     parser.add_argument("--interval", type=float, default=1.0, help="Interval in seconds between downloads (default: 1.0)")
     parser.add_argument(

@@ -52,7 +52,7 @@ history = trainer.train(num_updates=config.total_updates)
 ### 2. Run Example
 
 ```bash
-cd /Users/zengpengxin/workspace/CodeBase/qlib
+cd <仓库根>   # 仓库根见 scripts/path_config.py
 python examples/benchmarks/RLMultiStock/demo.py
 ```
 
