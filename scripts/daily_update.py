@@ -7,6 +7,7 @@
 """
 import argparse
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -19,9 +20,13 @@ from pathlib import Path
 
 import pandas as pd
 
-# 使用 rdagent conda 环境的 Python（包含 qlib + akshare）
-PYTHON = "/Users/zengpengxin/miniconda3/envs/rdagent/bin/python"
-QRUN = "/Users/zengpengxin/miniconda3/envs/rdagent/bin/qrun"
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import path_config  # noqa: E402
+
+# Python / qrun 解释器（env 覆盖，否则从当前解释器派生，机器无关）
+PYTHON = path_config.PYTHON
+QRUN = path_config.QRUN
 
 # ---------------------------------------------------------------------------
 # 配置（集中管理路径 & 全局常量）
@@ -29,9 +34,9 @@ QRUN = "/Users/zengpengxin/miniconda3/envs/rdagent/bin/qrun"
 
 @dataclass
 class Config:
-    qlib_root: Path = Path("/Users/zengpengxin/workspace/CodeBase/qlib")
-    qlib_base: Path = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415")
-    all_weather_base: Path = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data")
+    qlib_root: Path = path_config.QLIB_ROOT
+    qlib_base: Path = path_config.QLIB_BASE
+    all_weather_base: Path = path_config.ALL_WEATHER_BASE
     symbols: str | None = None          # 逗号分隔的 ETF 代码；None 表示全量
     today: date = field(default_factory=date.today)
     max_index_retries: int = 0          # 0 = 无限重试
@@ -87,12 +92,13 @@ def is_trading_day(cfg: Config) -> bool:
     if today.weekday() >= 5:
         return False
     if cfg.holidays_file.exists():
-        if today.isoformat() in cfg.holidays_file.read_text().splitlines():
+        if today.isoformat() in cfg.holidays_file.read_text(encoding="utf-8").splitlines():
             return False
     return True
 
 
 def run(cmd: list[str], cfg: Config) -> None:
+    path_config.export_env()  # 注入 QLIB_ROOT / QLIB_DATA_BASE，子进程 import path_config 得到一致路径
     subprocess.run(cmd, check=True, cwd=cfg.qlib_root)
 
 
@@ -121,11 +127,13 @@ def index_symbols_for_etfs(etf_codes: list[str], cfg: Config) -> list[str]:
 
 
 def update_yaml_dates(path: Path, today_str: str) -> None:
-    """将 workflow_config 的 data_end / backtest_end 更新为 today"""
-    content = path.read_text()
+    """将 workflow_config 的 data_end / backtest_end 更新为 today，
+    并将 __DATA_BASE__ / __REPO_ROOT__ 路径 token 替换为绝对路径（跨平台）。"""
+    content = path.read_text(encoding="utf-8")
     content = re.sub(r'(data_end:\s*&data_end\s*")[^"]*(")', rf'\g<1>{today_str}\2', content)
     content = re.sub(r'(backtest_end:\s*&backtest_end\s*")[^"]*(")', rf'\g<1>{today_str}\2', content)
-    path.write_text(content)
+    content = path_config.inject_yaml_tokens(content)
+    path.write_text(content, encoding="utf-8")
 
 
 @dataclass
@@ -143,7 +151,7 @@ def _iter_experiment_run_dirs(cfg: Config, experiment_name: str) -> Iterator[Pat
         meta = exp_dir / "meta.yaml"
         if not meta.exists():
             continue
-        name_line = next((ln for ln in meta.read_text().splitlines() if ln.startswith("name:")), None)
+        name_line = next((ln for ln in meta.read_text(encoding="utf-8").splitlines() if ln.startswith("name:")), None)
         if name_line is None:
             continue
         exp_name = name_line.split(":", 1)[1].strip().strip("'\"")
@@ -252,6 +260,14 @@ def notify_macos(title: str, message: str) -> None:
     """通过 osascript 发送 macOS 系统通知"""
     script = f'display notification "{message}" with title "{title}" sound name "Glass"'
     subprocess.run(["osascript", "-e", script], check=False)
+
+
+def notify(title: str, message: str) -> None:
+    """跨平台通知：macOS 用 osascript；Windows 仅记日志（避免弹窗干扰）"""
+    if sys.platform == "darwin":
+        notify_macos(title, message)
+    else:
+        logging.info(f"  [通知] {title}: {message}")
 
 
 # ---------------------------------------------------------------------------
@@ -389,9 +405,10 @@ class EMValUpdateStep(UpdateStep):
         #   emval      -> em_val_all_weather     实验的最新 run
         #   emval_womom-> em_val_all_weather_womom 实验的最新 run
         sb = cfg.sustained_best_config
-        content = sb.read_text()
-        emval_abs = str(emval_run.resolve())
-        womom_abs = str(womom_run.resolve())
+        content = sb.read_text(encoding="utf-8")
+        # 用正斜杠写 yaml（Windows 反斜杠在 yaml 双引号字符串里是非法转义）
+        emval_abs = str(emval_run.resolve()).replace("\\", "/")
+        womom_abs = str(womom_run.resolve()).replace("\\", "/")
 
         def _swap_exp_path_named(m: re.Match) -> str:
             # group(1)=`- name: <model>...` 前缀, group(2)=模型名,
@@ -406,7 +423,7 @@ class EMValUpdateStep(UpdateStep):
             re.DOTALL,
         )
         content, n = pattern.subn(_swap_exp_path_named, content)
-        sb.write_text(content)
+        sb.write_text(content, encoding="utf-8")
         logging.info(
             f"  SustainedBest exp_path 已按模型名更新（共 {n} 个）: "
             f"emval={emval_run.name}, emval_womom={womom_run.name}"
@@ -487,17 +504,17 @@ class SignalNotifyStep(UpdateStep):
                 detail += f" 等{len(changes)}只"
             msg = f"{result.get('curr_date', '')} 需调仓: {detail}"
             logging.info(f"  [{title}] 需调仓  {msg}；{hold_txt}")
-            notify_macos(f"{title} 明日需调仓", f"{msg}（明日执行）；{hold_txt}")
+            notify(f"{title} 明日需调仓", f"{msg}（明日执行）；{hold_txt}")
         elif action == "hold":
             msg = f"无操作，持仓不变；{hold_txt}"
             reason = result.get("reason", "")
             logging.info(f"  [{title}] {msg}" + (f"（{reason}）" if reason else ""))
-            notify_macos(f"{title} 持仓不变", msg)
+            notify(f"{title} 持仓不变", msg)
         else:
             reason = result.get("reason", action)
             msg = f"{reason}；{hold_txt}"
             logging.info(f"  [{title}] {msg}")
-            notify_macos(f"{title} 检测异常", msg)
+            notify(f"{title} 检测异常", msg)
 
 
 # ---------------------------------------------------------------------------

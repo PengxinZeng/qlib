@@ -2,6 +2,7 @@
 PipelineRunner：读取 pipeline.yaml，顺序执行各步骤
 """
 
+import sys
 import yaml
 from pathlib import Path
 from loguru import logger
@@ -11,8 +12,16 @@ from data_pipline.core.registry import get
 
 class PipelineRunner:
     def __init__(self, config_path: str):
-        with open(config_path, "r") as f:
-            cfg = yaml.safe_load(f)
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+        # 注入 __DATA_BASE__ / __REPO_ROOT__ token（跨平台路径，见 scripts/path_config.py）
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # scripts/
+            import path_config  # noqa: PLC0415
+            raw = path_config.inject_yaml_tokens(raw)
+        except ImportError:
+            pass  # 无 path_config 时按原样加载（纯相对路径场景）
+        cfg = yaml.safe_load(raw)
         self.output_base = Path(cfg["output_base"]).expanduser().resolve()
         self.steps = cfg["pipelines"]
         self.output_base.mkdir(parents=True, exist_ok=True)

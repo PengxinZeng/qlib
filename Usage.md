@@ -1,7 +1,44 @@
 # 环境
 ```
+# macOS
 conda activate rdagent
+
+# Windows
+conda activate qlib
 ```
+
+## 跨平台路径配置（scripts/path_config.py）
+所有脚本（daily_update / merge_clean_data / dump_etf_index / pipeline.yaml / workflow yaml）的路径
+统一由 `scripts/path_config.py` 解析，规则：
+- **仓库根 QLIB_ROOT**：环境变量 `QLIB_ROOT` 覆盖，否则取 `scripts/` 上一级（机器无关）
+- **数据根 DATA_BASE**：环境变量 `QLIB_DATA_BASE` 覆盖，否则按操作系统默认：
+  - Windows: `D:/Pengxin/CodeBase/Quant/QuantDataBank`
+  - macOS: `/Users/zengpengxin/workspace/DataBase/Quant/QlibBase`
+- **解释器**：`QLIB_PYTHON` / `QLIB_QRUN` 覆盖，否则从当前 `sys.executable` 派生
+
+```
+# 查看当前解析结果
+python scripts/path_config.py
+```
+
+### Windows 使用（代码 D:\Pengxin\CodeBase\Quant\qlib，数据 D:\Pengxin\CodeBase\Quant\QuantDataBank）
+```
+conda activate qlib
+python scripts/daily_update.py --force        # 全量（含数据链+模型链；周末/节假日需 --force）
+python scripts/daily_update.py --models_only --force   # 仅模型链
+python scripts/daily_update.py --symbols 510050 --force  # 单只冒烟
+```
+- 数据目录：`QuantDataBank\qlib_data_260415\`（source/ + qlib_etf_index_Extend_wBond/）+ `QuantDataBank\all_weather_data\`
+- `funds_list.csv` 放 `QuantDataBank\qlib_data_260415\source\`
+- 依赖：`pip install -e D:\Pengxin\CodeBase\Quant\qlib` + `pip install akshare`（≥1.18.91，修复乐咕估值日期 bug）
+- 日志：`logs/daily_update/YYYY-MM-DD.log`
+
+### macOS 使用（原配置，无需改动）
+```
+conda activate rdagent
+python scripts/daily_update.py
+```
+- 数据目录：`/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/`（qlib_data_260415 + all_weather_data）
 
 # 数据
 流程是1. 下载数据; 2. 转化为qlib bin; 3. 数据质量检查

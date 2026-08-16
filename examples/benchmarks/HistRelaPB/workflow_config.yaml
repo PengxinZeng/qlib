@@ -1,5 +1,6 @@
 qlib_init:
-    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415/qlib_etf_index_Extend_wBond"
+    # 运行时由 daily_update.py 注入数据根绝对路径
+    provider_uri: "D:/Pengxin/CodeBase/Quant/QuantDataBank/qlib_data_260415/qlib_etf_index_Extend_wBond"
     region: cn
 
 # MLflow配置 - 指定实验结果保存位置
@@ -14,15 +15,15 @@ benchmark: &benchmark "510050_CLEAN"
 # 时间参数配置
 time_config:
     data_start: &data_start "2005-02-23"
-    data_end: &data_end "2026-08-15"
+    data_end: &data_end "2026-08-16"
     train_start: &train_start "2005-02-23"
     train_end: &train_end "2017-01-03"
     valid_start: &valid_start "2017-01-04"
     valid_end: &valid_end "2019-10-08"
     # backtest_start: &backtest_start "2005-02-23"
-    # backtest_end: &backtest_end "2026-08-15"
+    # backtest_end: &backtest_end "2026-08-16"
     backtest_start: &backtest_start "2021-11-12"
-    backtest_end: &backtest_end "2026-08-15"
+    backtest_end: &backtest_end "2026-08-16"
 
 # 回测配置
 port_analysis_config: &port_analysis_config

@@ -6,12 +6,17 @@
 """
 
 import pandas as pd
+import sys
 from pathlib import Path
 from tqdm import tqdm
 import numpy as np
 from qlib.utils import fname_to_code, code_to_fname
 from qlib.constant import REG_CN
 import fire
+
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
 
 
 def normalize_field_name(name: str) -> str:
@@ -54,9 +59,9 @@ def save_symbol_data(args):
         np.hstack([date_index, field_data]).astype('<f').tofile(str(bin_path.resolve()))
 
 
-QLIB_BASE = "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415"
-DEFAULT_DATA_PATH = f"{QLIB_BASE}/source/etf_index/merged"
-DEFAULT_QLIB_DIR  = f"{QLIB_BASE}/qlib_etf_index_Extend_wBond"
+QLIB_BASE = path_config.QLIB_BASE
+DEFAULT_DATA_PATH = f"{path_config.MERGED_DIR}"
+DEFAULT_QLIB_DIR  = f"{path_config.QLIB_DATA_DIR}"
 
 
 def convert_etf_index_to_qlib(

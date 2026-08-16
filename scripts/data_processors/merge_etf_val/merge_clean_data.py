@@ -14,20 +14,26 @@
 """
 
 import shutil
-import pandas as pd
+import sys
 from pathlib import Path
+
+import pandas as pd
 from tqdm import tqdm
 
+# 跨平台路径集中配置（Mac / Windows 兼容）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import path_config  # noqa: E402
+
 # ─── 路径配置 ────────────────────────────────────────────────────────────────
-QLIB_BASE = Path("/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/qlib_data_260415")
-SOURCE_DIR = QLIB_BASE / "source"
+QLIB_BASE = path_config.QLIB_BASE
+SOURCE_DIR = path_config.SOURCE_DIR
 
 HFQ_DIR    = SOURCE_DIR / "etf_index" / "fund_kline_hfq"
 RAW_DIR    = SOURCE_DIR / "etf_index" / "fund_kline_raw"
 INDEX_DIR  = SOURCE_DIR / "etf_index" / "index_data"
 MERGED_DIR = SOURCE_DIR / "etf_index" / "merged"
-FUNDS_LIST = SOURCE_DIR / "funds_list.csv"
-BOND_FILE  = SOURCE_DIR / "cn_bond_rate" / "cn_bond_yield.csv"
+FUNDS_LIST = path_config.FUNDS_LIST
+BOND_FILE  = path_config.BOND_FILE
 
 FUND_KLINE_COLS = ["open", "high", "low", "close", "volume"]
 FUND_PRICE_COLS = ["open", "high", "low", "close"]   # 异常检测仅针对价格列（不含volume）

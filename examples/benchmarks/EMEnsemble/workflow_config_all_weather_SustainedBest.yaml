@@ -1,5 +1,6 @@
 qlib_init:
-    provider_uri: "/Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data/qlib_all_weather"
+    # 运行时由 daily_update.py 注入数据根绝对路径
+    provider_uri: "D:/Pengxin/CodeBase/Quant/QuantDataBank/all_weather_data/qlib_all_weather"
     region: cn
 
 mlflow_tracking_uri: "file:./mlruns"
@@ -11,13 +12,13 @@ benchmark: &benchmark "510300"
 # 时间参数配置（取自 all_weather_data/dataset_split/split_info.json）
 time_config:
     data_start: &data_start "2012-05-28"
-    data_end: &data_end "2026-08-15"
+    data_end: &data_end "2026-08-16"
     train_start: &train_start "2012-05-28"
     train_end: &train_end "2018-04-18"
     valid_start: &valid_start "2018-04-19"
     valid_end: &valid_end "2021-11-12"
     backtest_start: &backtest_start "2012-05-28"
-    backtest_end: &backtest_end "2026-08-15"
+    backtest_end: &backtest_end "2026-08-16"
 
 port_analysis_config: &port_analysis_config
     strategy:
@@ -53,7 +54,7 @@ task:
                     module_path: qlib.contrib.model.em_ensemble
                     kwargs:
                       # 正确配对：emval 指向 em_val_all_weather 实验（264173616341034074）覆盖回测区间的最新 run
-                      exp_path: "/Users/zengpengxin/workspace/CodeBase/qlib/mlruns/264173616341034074/903542eb48e04aebae3642803c15e336"
+                      exp_path: "D:/Pengxin/CodeBase/Quant/qlib/mlruns/485101932706302992/847bfb3147524ba5aad5c29f29675c04"
                       buy_rank_thre: 0.32
                       sell_rank_thre: 0.88
                       min_buy_days: 5
@@ -64,7 +65,7 @@ task:
                     module_path: qlib.contrib.model.em_ensemble
                     kwargs:
                       # 正确配对：emval_womom 指向 em_val_all_weather_womom 实验（353993812794722495）覆盖回测区间的最新 run
-                      exp_path: "/Users/zengpengxin/workspace/CodeBase/qlib/mlruns/353993812794722495/ae96aa19abb9448bb41e05c80f33ef39"
+                      exp_path: "D:/Pengxin/CodeBase/Quant/qlib/mlruns/691755839968684666/f78067dc567f4a0381b81ec2a85391cd"
                       buy_rank_thre: 0.07
                       sell_rank_thre: 0.94
                       min_buy_days: 5

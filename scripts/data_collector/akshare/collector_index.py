@@ -66,6 +66,8 @@ def rename_columns_to_english(df: pd.DataFrame) -> pd.DataFrame:
         "等权市净率": "pb_equal_weight",
         "市净率中位数": "pb_median",
     }
+    # 数据源列名可能带前导/尾随空格（如东财接口曾返回 " 等权滚动市盈率"），先 strip 再映射
+    df = df.rename(columns={c: c.strip() for c in df.columns})
     return df.rename(columns=column_map)
 
 

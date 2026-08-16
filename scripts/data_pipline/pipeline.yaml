@@ -1,7 +1,8 @@
 # pipeline.yaml — 全天候投资模型数据收集配置
 
 version: "1.0"
-output_base: /Users/zengpengxin/workspace/DataBase/Quant/QlibBase/all_weather_data
+# output_base 由 daily_update.py 运行时把 __DATA_BASE__ 注入为绝对路径
+output_base: __DATA_BASE__/all_weather_data
 
 # YAML anchors：定义一次，各 pipeline 用 alias 引用
 defaults:
@@ -134,7 +135,7 @@ pipelines:
       - source/equity_cn
       - source/equity_cn_unadj
       - source/commodity_metal_etf
-    anno_file: /Users/zengpengxin/workspace/CodeBase/qlib/EtfCompare/eft_data.csv
+    anno_file: __REPO_ROOT__/EtfCompare/eft_data.csv
     tolerance: 1e-4
     report_path: sanity_check/report.csv
 

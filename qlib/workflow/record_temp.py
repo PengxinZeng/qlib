@@ -31,6 +31,24 @@ from ..contrib.eva.alpha import calc_ic, calc_long_short_return, calc_long_short
 logger = get_module_logger("workflow", logging.INFO)
 
 
+def _artifact_dir(recorder) -> str:
+    """把 mlflow artifact_uri 转成本地文件系统目录（跨平台）。
+
+    Windows 上 mlflow 返回 ``file:D:\\...``（无 ``//``），macOS 返回
+    ``file:///Users/...``。统一剥掉 scheme 前缀；Windows 盘符路径（``/D:/foo``）
+    再去掉前导斜杠。
+    """
+    uri = str(recorder.artifact_uri)
+    if uri.startswith("file://"):
+        uri = uri[len("file://"):]
+    elif uri.startswith("file:"):
+        uri = uri[len("file:"):]
+    # Windows 盘符路径：/D:/foo -> D:/foo
+    if os.name == "nt" and uri.startswith("/") and len(uri) >= 3 and uri[2] == ":":
+        uri = uri[1:]
+    return uri
+
+
 class RecordTemp:
     """
     This is the Records Template class that enables user to generate experiment results such as IC and
@@ -794,7 +812,7 @@ class ReportRecord(RecordTemp):
         artifact_objects = {}
 
         # Save CSVs
-        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        artifact_uri = _artifact_dir(self.recorder)
         save_root = os.path.join(artifact_uri, "analysis_csvs")
         os.makedirs(save_root, exist_ok=True)
 
@@ -1077,7 +1095,7 @@ class EMEnsembleChartRecord(ACRecordTemp):
         # 为 suptitle 预留顶部空间，避免大标题与第一行子图标题重叠
         plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        artifact_uri = _artifact_dir(self.recorder)
         save_root = os.path.join(artifact_uri, self.artifact_path)
         os.makedirs(save_root, exist_ok=True)
         save_path = os.path.join(save_root, "em_ensemble_overview.png")
@@ -1279,7 +1297,7 @@ class MACDSignalChartRecord(ACRecordTemp):
 
         plt.tight_layout()
 
-        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        artifact_uri = _artifact_dir(self.recorder)
         save_root = os.path.join(artifact_uri, self.artifact_path)
         os.makedirs(save_root, exist_ok=True)
         save_path = os.path.join(save_root, "macd_overview.png")
@@ -1429,7 +1447,7 @@ class EMValChartRecord(ACRecordTemp):
 
         plt.tight_layout()
 
-        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        artifact_uri = _artifact_dir(self.recorder)
         save_root = os.path.join(artifact_uri, self.artifact_path)
         os.makedirs(save_root, exist_ok=True)
         save_path = os.path.join(save_root, "emval_overview.png")
@@ -1466,7 +1484,7 @@ class SignalDetailRecord(ACRecordTemp):
             return {}
 
         # 获取artifact保存路径
-        artifact_uri = str(self.recorder.artifact_uri).replace("file://", "")
+        artifact_uri = _artifact_dir(self.recorder)
         save_root = os.path.join(artifact_uri, self.artifact_path)
         os.makedirs(save_root, exist_ok=True)
         
