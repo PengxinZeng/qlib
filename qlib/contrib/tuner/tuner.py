@@ -436,6 +436,7 @@ class WorkflowConfigTuner(Tuner):
         from qlib.cli.run import load_config
         from qlib.config import C
         from qlib.model.trainer import task_train
+        from qlib.workflow.task.utils import replace_task_handler_with_cache
 
         config = load_config(workflow_path)
         qlib_init_config = config.get("qlib_init")
@@ -446,6 +447,21 @@ class WorkflowConfigTuner(Tuner):
             mlflow_uri = self.tuner_config.get("mlflow_tracking_uri", os.path.join(self.ex_dir, "mlruns"))
             exp_manager["kwargs"]["uri"] = "file:" + str(Path(mlflow_uri).resolve())
             qlib.init(**qlib_init_config, exp_manager=exp_manager)
+
+        # handler 缓存注入：TPE 每轮只改模型超参，特征工程结果不变，
+        # 复用同一缓存可省去每轮的 Loading data + ProcessInf + fit/process（约 60-80s/次）。
+        # 缓存目录解析与 qlib.cli.run 一致：QLIB_HANDLER_CACHE_DIR -> QLIB_DATA_BASE/all_weather_data/handler_cache
+        task = config.get("task")
+        if task and isinstance(task.get("dataset", {}).get("kwargs", {}).get("handler"), dict):
+            cache_dir = os.environ.get("QLIB_HANDLER_CACHE_DIR")
+            if not cache_dir and os.environ.get("QLIB_DATA_BASE"):
+                cache_dir = os.path.join(os.environ["QLIB_DATA_BASE"], "all_weather_data", "handler_cache")
+            if cache_dir:
+                cache_path = Path(cache_dir)
+                cache_path.mkdir(parents=True, exist_ok=True)
+                task = replace_task_handler_with_cache(task, cache_dir=cache_path)
+                config["task"] = task
+                self.logger.info("Use handler cache dir: %s", cache_dir)
 
         recorder = task_train(config.get("task"), experiment_name=config["experiment_name"])
         recorder.save_objects(config=config)

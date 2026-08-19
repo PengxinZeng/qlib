@@ -155,3 +155,51 @@ class Alpha158(DataHandlerLP):
 class Alpha158vwap(Alpha158):
     def get_label_config(self):
         return ["Ref($vwap, -2)/Ref($vwap, -1) - 1"], ["LABEL0"]
+
+
+class Alpha158OHLCV(Alpha158):
+    """Alpha158 的纯 OHLCV 变体：第 12 列（price 组第 4 位）由 `vwap0_mode` 决定。
+
+    适用于只 dump 了 open/high/low/close/volume 字段的数据集（如本仓库的
+    all_weather 数据链），数据无 $vwap。为了与标准 Alpha158 的输入结构对齐：
+
+      - price 组保留 OPEN0/HIGH0/LOW0（$open/$close, $high/$close, $low/$close）
+      - 第 12 列（VWAP0 位置）二选一：
+          * vwap0_mode="approx"（默认）：加权典型价近似 ($high+$low+2*$close)/4/$close
+            （vwap 的无成交量标准近似，刻画同样的"日内收高/收低"信息；名字保持 VWAP0
+            与 base 一致，下游依赖该名字的逻辑可无缝对齐）
+          * vwap0_mode="close"：CLOSE0 = $close/$close（常数 1，原始 8.69% 版本特征）
+      - kbar 9 + price 4 + rolling 145 = 158 维，与标准 Alpha158 完全一致
+      - label 仍为 T+2 收益（Ref($close,-2)/Ref($close,-1)-1）
+    """
+
+    def __init__(self, vwap0_mode="approx", **kwargs):
+        self._vwap0_mode = vwap0_mode
+        super().__init__(**kwargs)
+
+    def get_feature_config(self):
+        if self._vwap0_mode == "close":
+            # 原始 8.69% 版本：price 组直接含 CLOSE → CLOSE0 = $close/$close = 常数 1
+            conf = {
+                "kbar": {},
+                "price": {
+                    "windows": [0],
+                    "feature": ["OPEN", "HIGH", "LOW", "CLOSE"],
+                },
+                "rolling": {},
+            }
+            return Alpha158DL.get_feature_config(conf)
+        conf = {
+            "kbar": {},
+            "price": {
+                "windows": [0],
+                "feature": ["OPEN", "HIGH", "LOW"],
+            },
+            "rolling": {},
+        }
+        fields, names = Alpha158DL.get_feature_config(conf)
+        # 在 price 组末尾（OPEN0/HIGH0/LOW0 之后，rolling 组之前）插入近似 VWAP0，
+        # 与 base 的 VWAP0 位置完全一致（第 12 位），保证特征顺序对齐
+        fields.insert(12, "($high+$low+2*$close)/4/$close")
+        names.insert(12, "VWAP0")
+        return fields, names

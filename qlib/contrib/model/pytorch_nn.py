@@ -76,6 +76,7 @@ class DNNModelPytorch(Model):
             "layers": (256,),
         },
         valid_key=DataHandlerLP.DK_L,
+        ic_skip_size=50,  # ICLoss 按日计算 IC 时的最小样本数；小市值/小标的数据集（如 23 只 ETF）需调低
         # TODO: Infer Key is a more reasonable key. But it requires more detailed processing on label processing
     ):
         # Set logger.
@@ -88,6 +89,7 @@ class DNNModelPytorch(Model):
         self.batch_size = batch_size
         self.early_stop_rounds = early_stop_rounds
         self.eval_steps = eval_steps
+        self.ic_skip_size = ic_skip_size
         self.optimizer = optimizer.lower()
         self.loss_type = loss
         if isinstance(GPU, str):
@@ -353,7 +355,7 @@ class DNNModelPytorch(Model):
 
     def get_metric(self, pred, target, index):
         # NOTE: the order of the index must follow <datetime, instrument> sorted order
-        return -ICLoss()(pred, target, index)  # pylint: disable=E1130
+        return -ICLoss(skip_size=self.ic_skip_size)(pred, target, index)  # pylint: disable=E1130
 
     def _nn_predict(self, data, return_cpu=True):
         """Reusing predicting NN.

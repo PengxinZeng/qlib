@@ -49,12 +49,21 @@ SAFE_PICKLE_CLASSES: Set[Tuple[str, str]] = {
     ("qlib.data.dataset.handler", "DataHandler"),
     ("qlib.data.dataset.handler", "DataHandlerLP"),
     ("qlib.data.dataset.loader", "StaticDataLoader"),
+    # 本项目自定义的 Alpha158 系列 handler（纯 OHLCV 变体，仓库内受信任代码）
+    ("qlib.contrib.data.handler", "Alpha158"),
+    ("qlib.contrib.data.handler", "Alpha158OHLCV"),
+    ("qlib.contrib.data.handler", "Alpha158vwap"),
+    ("qlib.contrib.data.handler", "Alpha360"),
 }
 
 
 TRUSTED_MODULE_PREFIXES = (
     "pandas",
     "numpy",
+    # qlib 内部全部模块（handler/processor/loader/utils 等）——缓存文件由仓库内
+    # 代码生成，反序列化 handler 缓存时需要这些类（DataHandlerLP、各 Processor、
+    # 自定义 handler、zscore 等工具函数）
+    "qlib",
 )
 
 

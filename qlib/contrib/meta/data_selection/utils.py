@@ -54,8 +54,12 @@ class ICLoss(nn.Module):
             )
             ic_all += ic_day
         if len(diff_point) - 1 - skip_n <= 0:
-            __import__("ipdb").set_trace()
-            raise ValueError("No enough data for calculating IC")
+            # 原为 `__import__("ipdb").set_trace()` 调试断点，无 ipdb 环境会崩溃；
+            # 改为抛出带上下文信息的异常，便于定位（如 valid 段数据不足）。
+            raise ValueError(
+                "No enough data for calculating IC: "
+                f"diff_points={len(diff_point) - 1}, skipped={skip_n}, skip_size={self.skip_size}"
+            )
         if skip_n > 0:
             get_module_logger("ICLoss").info(
                 f"{skip_n} days are skipped due to zero std or small scale of valid samples."
