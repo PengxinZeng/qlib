@@ -163,3 +163,4 @@ task:
             dataset: <DATASET>
 
 # nohup python -u qlib/cli/run.py  examples/benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml > output/EMEnsemble_SustainedBest_TV.log 2>&1 &
+# cmd /c '"D:\Pengxin\software\Anaconda\envs\qlib\python.exe" -u -X utf8 qlib/cli/run.py  examples/benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml > output/workflow_config_all_weather_SustainedBest.log 2>&1'

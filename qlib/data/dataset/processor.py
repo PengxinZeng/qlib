@@ -259,6 +259,43 @@ class ZScoreNorm(Processor):
         return df
 
 
+class RMSScaleNorm(Processor):
+    """RMS (root-mean-square) scaling without centering.
+
+    Transform:  x -> x / rms_train,  where rms_train = sqrt(mean(x^2)) over the fit window.
+
+    Unlike :class:`ZScoreNorm` (which centers by the mean), this processor only scales.
+    For a portfolio/combination return loss with weights summing to 1, centering is an
+    additive constant per step and does not change gradients; scaling-only keeps the
+    sign of the original value (positive return -> positive z), which is semantically
+    closer to the raw portfolio return and leaves room for asymmetric penalties or
+    turnover regularization in future work.
+
+    fit uses [fit_start_time, fit_end_time] (train segment) only, so no test leakage.
+    """
+
+    def __init__(self, fit_start_time, fit_end_time, fields_group=None):
+        self.fit_start_time = fit_start_time
+        self.fit_end_time = fit_end_time
+        self.fields_group = fields_group
+
+    def fit(self, df: pd.DataFrame = None):
+        df = fetch_df_by_index(df, slice(self.fit_start_time, self.fit_end_time), level="datetime")
+        self.cols = get_group_columns(df, self.fields_group)
+        X = df[self.cols].values
+        self.rms_train = np.sqrt(np.nanmean(np.square(X), axis=0))
+        # columns with zero scale keep the identity transform (divide by 1)
+        self.ignore = self.rms_train == 0
+        self.rms_train[self.ignore] = 1.0
+
+    def __call__(self, df):
+        def scale(x, rms_train=self.rms_train):
+            return x / rms_train
+
+        df.loc(axis=1)[self.cols] = scale(df[self.cols].values)
+        return df
+
+
 class RobustZScoreNorm(Processor):
     """Robust ZScore Normalization
 

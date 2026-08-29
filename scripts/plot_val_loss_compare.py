@@ -59,27 +59,43 @@ def get_run_id(exp_name: str) -> str:
 
 
 def main():
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(13, 7))
     for exp_name, meta in EXPS.items():
         rid = get_run_id(exp_name)
-        df = load_series(rid, "val_loss")
-        plt.plot(df.step, df.value, label=meta["label"], color=meta["color"], linewidth=1.8)
-        best = df.loc[df.value.idxmin()]
-        plt.scatter([best.step], [best.value], color=meta["color"], zorder=5, s=40)
+        color = meta["color"]
+
+        # train loss：每 step 记录一次（密），浅色虚线
+        tl = load_series(rid, "train_loss")
+        plt.plot(
+            tl.step, tl.value,
+            label=f"{meta['label']} - train loss",
+            color=color, linestyle="--", linewidth=1.0, alpha=0.55,
+        )
+
+        # val loss：每 20 步评估一次（疏），深色实线
+        vl = load_series(rid, "val_loss")
+        plt.plot(
+            vl.step, vl.value,
+            label=f"{meta['label']} - val loss",
+            color=color, linestyle="-", linewidth=1.8,
+        )
+        best = vl.loc[vl.value.idxmin()]
+        plt.scatter([best.step], [best.value], color=color, zorder=5, s=40)
         plt.annotate(
-            f"{meta['label']}\nbest={best.value:.4f} @ step {int(best.step)}",
+            f"best val={best.value:.4f}\n@ step {int(best.step)}",
             xy=(best.step, best.value),
             xytext=(best.step + 60, best.value + 0.05),
-            color=meta["color"],
-            fontsize=9,
-            arrowprops=dict(arrowstyle="->", color=meta["color"], lw=0.8),
+            color=color,
+            fontsize=8,
+            arrowprops=dict(arrowstyle="->", color=color, lw=0.8),
         )
-        print(f"{meta['label']}: n_points={len(df)}, min={df.value.min():.4f} @ {int(best.step)}")
+        print(f"{meta['label']}: train n={len(tl)}, min={tl.value.min():.4f} | "
+              f"val n={len(vl)}, min={vl.value.min():.4f} @ {int(best.step)}")
 
-    plt.xlabel("Step (每 20 步评估一次)")
-    plt.ylabel("valid loss (MSE)")
-    plt.title("CSZScoreNorm vs ZScoreNorm 的 valid loss 训练曲线（seed=0, 对齐base 157维）")
-    plt.legend()
+    plt.xlabel("Step")
+    plt.ylabel("loss (MSE)")
+    plt.title("CSZScoreNorm vs ZScoreNorm：train loss（虚线）与 val loss（实线）曲线（seed=0, 对齐base 157维）")
+    plt.legend(fontsize=8, ncol=2)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     out_path = OUT / "val_loss_compare_csz_vs_global.png"

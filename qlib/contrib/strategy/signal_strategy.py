@@ -88,6 +88,7 @@ class TopkDropoutStrategy(BaseSignalStrategy):
         hold_thresh=1,
         only_tradable=False,
         forbid_all_trade_at_limit=True,
+        signal_shift=1,  # 决策所用信号相对当前交易日的偏移：1=用前一日信号(t+1成交)，0=用当日信号(t日成交)
         **kwargs,
     ):
         """
@@ -125,6 +126,10 @@ class TopkDropoutStrategy(BaseSignalStrategy):
             else:
 
                 strategy will sell at limit up and buy ad limit down.
+        signal_shift : int
+            决策所用信号相对当前交易日的偏移（bars）：
+            - 1（默认）：用前一个交易日的信号做今日决策（信号日 t → t+1 成交）
+            - 0：用当日信号做当日决策（信号日 t → t 日成交；配合 deal_price=close 即 t 日收盘成交）
         """
         super().__init__(**kwargs)
         self.topk = topk
@@ -134,12 +139,13 @@ class TopkDropoutStrategy(BaseSignalStrategy):
         self.hold_thresh = hold_thresh
         self.only_tradable = only_tradable
         self.forbid_all_trade_at_limit = forbid_all_trade_at_limit
+        self.signal_shift = signal_shift
 
     def generate_trade_decision(self, execute_result=None):
         # get the number of trading step finished, trade_step can be [0, 1, 2, ..., trade_len - 1]
         trade_step = self.trade_calendar.get_trade_step()
         trade_start_time, trade_end_time = self.trade_calendar.get_step_time(trade_step)
-        pred_start_time, pred_end_time = self.trade_calendar.get_step_time(trade_step, shift=1)
+        pred_start_time, pred_end_time = self.trade_calendar.get_step_time(trade_step, shift=self.signal_shift)
         pred_score = self.signal.get_signal(start_time=pred_start_time, end_time=pred_end_time)
         # NOTE: the current version of topk dropout strategy can't handle pd.DataFrame(multiple signal)
         # So it only leverage the first col of signal

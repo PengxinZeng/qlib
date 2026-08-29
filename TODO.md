@@ -72,12 +72,13 @@ python -u qlib/cli/run.py examples/benchmarks/MACDSignal/workflow_config_all_wea
 - [x] ALL-IN + Top-K选股
 - [x] MACD + Top-K选股
 - [x] 均线作估值
-- [ ] Emssemble模型
+- [x] Emssemble模型
 - [ ] MACD-周频月频
 - [ ] Oracle
 
 ## Imitation Learning
-- [ ] return rate next day
+- [ ] return rate next day (MLP)
+   - 持仓learning化
 
 ## Hand Craft 估值
 - [ ] Hist Rela PB

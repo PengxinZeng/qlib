@@ -3,6 +3,8 @@
 # 路径相对本文件所在目录解析。
 
 # 待评测的配置（可跨方法混排；每个都是完整可 qrun 的 workflow_config）
+# 可选字段 pretrained: 不重新训练，从 mlflow 加载已训练模型，仅对新 test 段评测
+#   pretrained: {experiment: <mlflow 实验名>, run_id: <rid, 可选，缺省取最新 FINISHED>}
 configs:
   # - alias: equalweight
   #   path: ../benchmarks/AllIn/workflow_config_all_weather_equalweight.yaml           # 等权全市场基准
@@ -31,6 +33,15 @@ configs:
   - alias: EMEnsembleSustainedBest
     path: ../benchmarks/EMEnsemble/workflow_config_all_weather_SustainedBest.yaml                      # EMEnsemble SustainedBest
 
+  # ---- MLP Alpha158 globalnorm：label 全局 ZScoreNorm + 特征原始尺度（seed0, 20.59% 年化）----
+  # 不重新训练：加载已训练 run 79326c09（mlp_all_weather_alpha158_globalnorm 实验, seed0），
+  # 仅对 A/B/AB/TrainVal 各段做预测 + 回测。
+  - alias: mlp_globalnorm_seed0
+    path: ../benchmarks/MLP/workflow_config_mlp_all_weather_alpha158_globalnorm.yaml
+    pretrained:
+      experiment: mlp_all_weather_alpha158_globalnorm
+      run_id: 79326c098519402e82d371352bc4f6f3
+
   # ---- EMEnsemble × MACD 组合（在原模型池中加入 MACD 趋势模型） ----
   # - alias: EMEnsemble_MACD
   #   path: ../benchmarks/EMEnsemble/workflow_config_all_weather_MACD.yaml                                # EMEnsemble + MACD
@@ -44,16 +55,17 @@ configs:
 # 测试段：fit 段沿用各配置自带的 train/valid(模型在 train 排序 + valid 选 K)，
 # runner 仅覆盖 test 段与回测窗口。A=test 段，B=testB 段。
 regimes:
-  Val:
-    test: ["2018-04-19", "2021-11-12"]
+  TrainVal:
+    test: ["2012-05-28", "2021-11-12"]
+    # 注：这是各配置的 valid 段（train 2012-2018 → valid 2018-2021 选 K）。
+    # 对 pretrained 模型（如 mlp_globalnorm_seed0）此处即"样本内"段（valid 曾用于早停选优），
+    # 收益偏高属预期；A/B/AB 才是真正的外样本评测段。
   A:
     test: ["2021-11-15", "2024-05-23"]
   B:
     test: ["2024-05-24", "2026-07-17"]
   AB:
     test: ["2021-11-15", "2026-07-17"]
-  ValAB:
-    test: ["2018-04-19", "2026-07-17"]
 
 # 输出目录(相对本文件)
 output_dir: results

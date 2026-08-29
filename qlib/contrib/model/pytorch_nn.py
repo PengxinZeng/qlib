@@ -36,6 +36,79 @@ from qlib.contrib.meta.data_selection.utils import ICLoss
 from torch.nn import DataParallel
 
 
+class TopKPortfolioLoss(nn.Module):
+    """Portfolio-return loss: differentiable surrogate for TopkDropoutStrategy(topk) return.
+
+    ``mode="soft"`` (training objective): weights = temperature softmax over the daily
+    cross-section, so **forward and gradient are the same function** — the model learns
+    exactly what it optimizes. It only needs >=2 instruments per day (non-degenerate
+    softmax), so early years with a few ETFs remain usable for training.
+
+    ``mode="hard"`` (evaluation metric): exact top-k equal-weight portfolio return,
+    forward-only (no gradient). Used as the validation metric so early stopping /
+    checkpoint selection matches the true strategy return.
+
+    ``idx`` must be a sorted index of (datetime, instrument) aligned with pred/y
+    (same convention as :class:`ICLoss`).
+    """
+
+    def __init__(self, topk=5, tau=0.2, skip_size=2, tau_min=0.1, anneal_steps=2000, mode="soft"):
+        super().__init__()
+        self.topk = topk
+        self.tau = tau
+        self.skip_size = skip_size
+        self.tau_min = tau_min
+        self.anneal_steps = anneal_steps
+        self.mode = mode
+        self._step = 0
+
+    def _current_tau(self):
+        """linear anneal from ``tau`` down to ``tau_min`` over ``anneal_steps``"""
+        if self.anneal_steps <= 0:
+            return self.tau
+        self._step += 1
+        ratio = min(1.0, self._step / self.anneal_steps)
+        return self.tau + (self.tau_min - self.tau) * ratio
+
+    def forward(self, pred, y, idx):
+        # split by day (assume idx sorted by <datetime, instrument>, like ICLoss)
+        prev = None
+        diff_point = []
+        for i, (date, inst) in enumerate(idx):
+            if date != prev:
+                diff_point.append(i)
+            prev = date
+        diff_point.append(None)
+
+        tau = self._current_tau()
+        loss_sum = 0.0
+        n_days = 0
+        for start_i, end_i in zip(diff_point, diff_point[1:]):
+            p = pred[start_i:end_i]
+            r = y[start_i:end_i]
+            # soft 模式只要 ≥skip_size 只；hard 模式要凑满 topk 才能取 top-k
+            min_n = max(self.skip_size, self.topk) if self.mode == "hard" else self.skip_size
+            if p.shape[0] < min_n:
+                continue
+            if p.std() < 1e-8 or r.std() < 1e-8:
+                continue
+            # per-day z-score of predictions: scale-invariant, removes day drift
+            p_n = (p - p.mean()) / (p.std() + 1e-8)
+            if self.mode == "soft":
+                # softmax 加权组合收益：forward == gradient，模型学的就是它
+                w = torch.softmax(p_n / tau, dim=0)
+                day_ret = (w * r).sum()
+            else:
+                # hard：精确 top-k 等权收益（仅前向，评测/选点用）
+                _, topk_idx = torch.topk(p_n, self.topk)
+                day_ret = r[topk_idx].mean()
+            loss_sum = loss_sum - day_ret  # negative mean portfolio return
+            n_days += 1
+        if n_days <= 0:
+            raise ValueError("No enough data for TopKPortfolioLoss: n_days=0")
+        return loss_sum / n_days
+
+
 class DNNModelPytorch(Model):
     """DNN Model
     Parameters
@@ -76,7 +149,16 @@ class DNNModelPytorch(Model):
             "layers": (256,),
         },
         valid_key=DataHandlerLP.DK_L,
-        ic_skip_size=50,  # ICLoss 按日计算 IC 时的最小样本数；小市值/小标的数据集（如 23 只 ETF）需调低
+        ic_skip_size=50,  # ICLoss 按日计算 IC 时的最小样本数（仅 mse/binary 模式的指标用）
+        # ---- portfolio loss (loss=portfolio) 专属参数 ----
+        min_days_size=2,  # portfolio 训练：每日最少标的数。softmax 梯度不要求凑满 topk，≥2 只即可
+        topk=5,  # 组合持仓数（hard 评测口径 + 与 TopkDropoutStrategy topk 对齐）
+        tau=0.2,  # softmax 温度；退火起点
+        tau_min=0.1,  # 退火终点
+        anneal_steps=2000,  # tau 从 tau 线性退火到 tau_min 的步数
+        turnover_penalty=0.0,  # v1 暂未启用（跨日标的对齐），保留参数位
+        dates_per_step=16,  # portfolio 模式下每步采样的交易日数（每日全横截面）
+        portfolio_weight=0.5,  # portfolio_mse 混合 loss：组合收益项的权重，(1-w) 给 MSE 项
         # TODO: Infer Key is a more reasonable key. But it requires more detailed processing on label processing
     ):
         # Set logger.
@@ -90,6 +172,14 @@ class DNNModelPytorch(Model):
         self.early_stop_rounds = early_stop_rounds
         self.eval_steps = eval_steps
         self.ic_skip_size = ic_skip_size
+        self.min_days_size = min_days_size
+        self.topk = topk
+        self.tau = tau
+        self.tau_min = tau_min
+        self.anneal_steps = anneal_steps
+        self.turnover_penalty = turnover_penalty
+        self.dates_per_step = dates_per_step
+        self.portfolio_weight = portfolio_weight
         self.optimizer = optimizer.lower()
         self.loss_type = loss
         if isinstance(GPU, str):
@@ -120,15 +210,39 @@ class DNNModelPytorch(Model):
             f"\nenable data parall : {self.data_parall}"
             f"\npt_model_uri: {pt_model_uri}"
             f"\npt_model_kwargs: {pt_model_kwargs}"
+            f"\ntopk : {topk} (hard eval)  min_days_size : {min_days_size} (soft train)"
+            f"\ntau : {tau} -> tau_min={tau_min} over {anneal_steps} steps"
+            f"\nturnover_penalty : {turnover_penalty}"
+            f"\ndates_per_step : {dates_per_step}"
+            f"\nportfolio_weight : {portfolio_weight} (portfolio_mse 混合 loss)"
         )
 
         if self.seed is not None:
             np.random.seed(self.seed)
             torch.manual_seed(self.seed)
 
-        if loss not in {"mse", "binary"}:
+        if loss not in {"mse", "binary", "portfolio", "portfolio_mse"}:
             raise NotImplementedError("loss {} is not supported!".format(loss))
-        self._scorer = mean_squared_error if loss == "mse" else roc_auc_score
+        self._scorer = mean_squared_error if loss in ("mse", "portfolio_mse") else roc_auc_score
+
+        # 训练用 portfolio loss（soft 模式：softmax 加权收益，梯度=目标；每日 ≥ min_days_size 只即可）
+        self._portfolio_loss = TopKPortfolioLoss(
+            topk=self.topk,
+            tau=self.tau,
+            skip_size=self.min_days_size,
+            tau_min=self.tau_min,
+            anneal_steps=self.anneal_steps,
+            mode="soft",
+        )
+        # 验证/评测用实例（hard 模式：精确 top-k 等权收益，不退火，早停选点与策略同口径）
+        self._portfolio_loss_eval = TopKPortfolioLoss(
+            topk=self.topk,
+            tau=self.tau_min,
+            skip_size=self.min_days_size,
+            tau_min=self.tau_min,
+            anneal_steps=0,
+            mode="hard",
+        )
 
         if init_model is None:
             self.dnn_model = init_instance_by_config({"class": pt_model_uri, "kwargs": pt_model_kwargs})
@@ -239,6 +353,23 @@ class DNNModelPytorch(Model):
         # return
         # prepare training data
         train_num = all_t["y"]["train"].shape[0]
+        is_portfolio = self.loss_type in ("portfolio", "portfolio_mse")
+        if is_portfolio:
+            # softmax 训练目标只需 ≥ min_days_size 只标的（不必凑满 topk），
+            # 因此早期上市 ETF 少的日子也能参与训练。
+            train_index = all_df["y"]["train"].index  # MultiIndex (datetime, instrument)
+            train_dates_arr = train_index.get_level_values(0).to_numpy()
+            min_samples = self.min_days_size
+            dates, counts = np.unique(train_dates_arr, return_counts=True)
+            train_dates_unique = dates[counts >= min_samples]
+            self.logger.info(
+                "portfolio loss: %d/%d unique train dates have >=%d instruments, "
+                "sampling %d dates per step",
+                len(train_dates_unique),
+                len(dates),
+                min_samples,
+                self.dates_per_step,
+            )
 
         for step in range(1, self.max_steps + 1):
             if stop_steps >= self.early_stop_rounds:
@@ -248,14 +379,24 @@ class DNNModelPytorch(Model):
             loss = AverageMeter()
             self.dnn_model.train()
             self.train_optimizer.zero_grad()
-            choice = np.random.choice(train_num, self.batch_size)
+            if is_portfolio:
+                if self.dates_per_step > len(train_dates_unique):
+                    dates_chosen = np.random.choice(train_dates_unique, self.dates_per_step, replace=True)
+                else:
+                    dates_chosen = np.random.choice(train_dates_unique, self.dates_per_step, replace=False)
+                mask = np.isin(train_dates_arr, dates_chosen)
+                choice = np.flatnonzero(mask)
+                step_idx = train_index[choice]
+            else:
+                choice = np.random.choice(train_num, self.batch_size)
+                step_idx = None
             x_batch_auto = all_t["x"]["train"][choice].to(self.device)
             y_batch_auto = all_t["y"]["train"][choice].to(self.device)
             w_batch_auto = all_t["w"]["train"][choice].to(self.device)
 
             # forward
             preds = self.dnn_model(x_batch_auto)
-            cur_loss = self.get_loss(preds, w_batch_auto, y_batch_auto, self.loss_type)
+            cur_loss = self.get_loss(preds, w_batch_auto, y_batch_auto, self.loss_type, idx=step_idx)
             cur_loss.backward()
             self.train_optimizer.step()
             loss.update(cur_loss.item())
@@ -274,7 +415,15 @@ class DNNModelPytorch(Model):
 
                         # forward
                         preds = self._nn_predict(all_t["x"]["valid"], return_cpu=False)
-                        cur_loss_val = self.get_loss(preds, all_t["w"]["valid"], all_t["y"]["valid"], self.loss_type)
+                        if is_portfolio:
+                            # 验证 loss 用 hard 模式 eval 实例（精确 top-k 收益，不退火，不推进训练退火计数）
+                            cur_loss_val = self._portfolio_loss_eval(
+                                preds.reshape(-1), all_t["y"]["valid"].reshape(-1), all_df["y"]["valid"].index
+                            )
+                        else:
+                            cur_loss_val = self.get_loss(
+                                preds, all_t["w"]["valid"], all_t["y"]["valid"], self.loss_type
+                            )
                         loss_val = cur_loss_val.item()
                         metric_val = (
                             self.get_metric(
@@ -341,8 +490,17 @@ class DNNModelPytorch(Model):
         assert len(self.train_optimizer.param_groups) == 1
         return self.train_optimizer.param_groups[0]["lr"]
 
-    def get_loss(self, pred, w, target, loss_type):
-        pred, w, target = pred.reshape(-1), w.reshape(-1), target.reshape(-1)
+    def get_loss(self, pred, w, target, loss_type, idx=None):
+        pred, target = pred.reshape(-1), target.reshape(-1)
+        if loss_type in ("portfolio", "portfolio_mse"):
+            # 组合收益 loss：需要 (datetime, instrument) 索引按日分组；忽略 reweighter w
+            pl = self._portfolio_loss(pred, target, idx)
+            if loss_type == "portfolio":
+                return pl
+            # portfolio_mse：组合收益项 + MSE 项加权混合（w=portfolio_weight）
+            mse = torch.mul(pred - target, pred - target).mean()
+            return self.portfolio_weight * pl + (1.0 - self.portfolio_weight) * mse
+        w = w.reshape(-1)
         if loss_type == "mse":
             sqr_loss = torch.mul(pred - target, pred - target)
             loss = torch.mul(sqr_loss, w).mean()
@@ -354,6 +512,9 @@ class DNNModelPytorch(Model):
             raise NotImplementedError("loss {} is not supported!".format(loss_type))
 
     def get_metric(self, pred, target, index):
+        if self.loss_type in ("portfolio", "portfolio_mse"):
+            # 验证/测试期的 top-k 等权组合日收益均值（正值越大越好；hard 口径与策略一致）
+            return -self._portfolio_loss_eval(pred, target, index)  # pylint: disable=E1130
         # NOTE: the order of the index must follow <datetime, instrument> sorted order
         return -ICLoss(skip_size=self.ic_skip_size)(pred, target, index)  # pylint: disable=E1130
 

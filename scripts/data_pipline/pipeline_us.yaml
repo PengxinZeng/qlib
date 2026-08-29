@@ -1,8 +1,9 @@
-# pipeline.yaml — 全天候投资模型数据收集配置
+# pipeline_us.yaml — 全天候投资模型数据收集配置（隔离数据集）
+# 本配置用于纳指/标普500 相关实验，输出到独立数据根 all_weather_data_us，不影响原 all_weather_data
 
 version: "1.0"
-# output_base 由 daily_update.py 运行时把 __DATA_BASE__ 注入为绝对路径
-output_base: __DATA_BASE__/all_weather_data
+# output_base 由 run_pipeline.py 运行时把 __DATA_BASE__ 注入为绝对路径
+output_base: __DATA_BASE__/all_weather_data_us
 
 # YAML anchors：定义一次，各 pipeline 用 alias 引用
 defaults:
@@ -21,66 +22,11 @@ pipelines:
   #   force: *force
   #   output_dir: source/cash_cn
 
-  - name: bond_cn
-    type: EastmoneyFundCollector
-    symbols:
-      - {code: "018846", name: "华泰保兴6个月持有期债券A",       index: "主动管理-债券-混债"}
-      - {code: "002276", name: "中邮纯债恒利债券A",       index: "主动管理-债券-混债"}
-      - {code: "005215", name: "南方全天候策略混合A",       index: "主动管理"}   # 场外基金，非场内ETF；腾讯ETF接口无此代码，走天天基金净值
-    start: *start
-    force: *force
-    output_dir: source/bond_cn # 债券
-
-  # - name: bond_cn_etf
-  #   type: TencentETFCollector
-  #   symbols:
-  #     - {code: "511800", name: "华安短债",       index: "H11007"}
-  #     - {code: "511010", name: "国开债ETF",      index: "H11008"}
-  #     - {code: "511090", name: "30年国债ETF",    index: "H11009"}
-  #     - {code: "159972", name: "活跃国债ETF",    index: "H11009"}
-  #     - {code: "511260", name: "十年国债ETF",    index: "H11008"}
-  #   fq_type: hfq
-  #   start: *start
-  #   force: *force
-  #   output_dir: source/bond_cn # 债券
-
-  - name: equity_cn
-    type: TencentETFCollector
-    symbols:
-      - {code: "510300", name: "沪深300ETF华泰",      index: "1B0300"}
-      - {code: "510310", name: "沪深300ETF易方达",      index: "1B0300"}
-      - {code: "510500", name: "中证500ETF南方",      index: "1B0905"}
-      - {code: "159922", name: "中证500ETF嘉实",      index: "1B0905"}
-      - {code: "512100", name: "中证1000ETF南方",      index: "1B0852"}
-      - {code: "159845", name: "中证1000ETF华夏",      index: "1B0852"}
-      - {code: "512890", name: "红利低波ETF华泰",      index: "H30269"}
-      # 563020 已注释：腾讯接口不提供该标的 hfqday（后复权）数据，仅有 day（不复权），
-      # 若需纳入请移入 equity_cn_unadj（fq_type=""）并注意除权价低估收益问题
-      # - {code: "563020", name: "红利低波ETF易方达",      index: "H30269"}
-      - {code: "159920", name: "恒生ETF华夏",      index: "HSI"}
-      - {code: "513660", name: "恒生ETF华夏",      index: "HSI"}
-      # - {code: "510210", name: "上证指数ETF富国",      index: "1A0001"}
-      # - {code: "510760", name: "上证指数ETF国泰",      index: "1A0001"}
-      # - {code: "159903", name: "深成ETF南方",      index: "399001"}
-      # - {code: "159943", name: "深证成指ETF大成",      index: "399001"}
-      # - {code: "159915", name: "创业板ETF",       index: "399006"}
-      # - {code: "512880", name: "证券ETF",         index: "399975"}
-      # - {code: "515180", name: "红利低波ETF",     index: "000015"}
-    fq_type: hfq
-    start: *start
-    force: *force
-    output_dir: source/equity_cn # 股票
-
-  # 腾讯接口不提供 hfqday（后复权）数据的标的，改用不复权价格（fq_type 留空）; 需要check 收益率一致性
+  # 纳指/标普500 相关 ETF（不复权价格 fq_type 留空；需 check 收益率一致性）
+  # 隔离数据集：仅保留纳指(NDX)/标普500(SPX) 相关 ETF（原恒生科技/自由现金流已移除）
   - name: equity_cn_unadj
     type: TencentETFCollector
     symbols:
-      - {code: "159201", name: "自由现金流ETF华夏",      index: "980092"}
-      - {code: "159222", name: "自由现金流ETF易方达",      index: "980092"}
-      # - {code: "563020", name: "红利低波ETF易方达",      index: "H30269"}  # 除权价低估收益
-      - {code: "513180", name: "恒生科技ETF华夏",      index: "HS2083"}
-      - {code: "513130", name: "恒生科技ETF华泰柏瑞",      index: "HS2083"}
-      - {code: "513010", name: "恒生科技ETF易方达",      index: "HS2083"}
       - {code: "513300", name: "纳斯达克ETF华夏",      index: "NDX"}
       - {code: "159501", name: "纳指ETF嘉实",      index: "NDX"}
       - {code: "159696", name: "纳指ETF易方达",      index: "NDX"}
@@ -92,27 +38,16 @@ pipelines:
     force: *force
     output_dir: source/equity_cn_unadj # 股票
 
-  - name: commodity_metal_etf
-    type: TencentETFCollector
-    symbols:
-      - {code: "518880", name: "黄金ETF华安",      index: "AU9999"}
-      - {code: "159937", name: "黄金ETF博时",      index: "AU9999"}
-      - {code: "159934", name: "黄金ETF易方达",      index: "AU9999"}
-    fq_type: hfq
-    start: *start
-    force: *force
-    output_dir: source/commodity_metal_etf # 大宗商品、贵金属ETF
-
   # 美股/指数（腾讯 usfqkline 接口，须用 TencentUSCollector；fq_type 必须 qfq/hfq）
   # code 不带 us 前缀（如 NDX），CSV/下游 symbol 即 NDX；历史可回溯至 2000-01-03
+  # 注意：腾讯 usfqkline 仅对指数提供长历史（NDX/INX/DJI/IXIC）；美股ETF(如SPY)只返最近1天
   - name: us_index
     type: TencentUSCollector
     symbols:
       - {code: "NDX", name: "纳斯达克100指数",   index: "NDX"}
       # - {code: "DJI",  name: "道琼斯工业指数",   index: "DJI"}
       # - {code: "IXIC", name: "纳斯达克综合指数", index: "IXIC"}
-      # - {code: "QQQ",  name: "纳斯达克100ETF",   index: "NDX"}   # 美股ETF，qfq 价
-      - {code: "SPY",  name: "标普500ETF",       index: "SPX"}
+      - {code: "INX",  name: "标普500指数",      index: "SPX"}   # SPY(美股ETF)无历史，改用指数 INX
     fq_type: qfq
     start: *start
     force: *force
@@ -150,9 +85,7 @@ pipelines:
   - name: sanity_check
     type: SanityChecker
     source_dirs:
-      - source/equity_cn
       - source/equity_cn_unadj
-      - source/commodity_metal_etf
       - source/us_index
     anno_file: __REPO_ROOT__/EtfCompare/eft_data.csv
     tolerance: 1e-4
@@ -162,15 +95,8 @@ pipelines:
   - name: merge
     type: AllWeatherMerger
     source_dirs:
-      - source/cash_cn
-      - source/bond_cn
-      - source/equity_cn
       - source/equity_cn_unadj
-      - source/equity_us
       - source/us_index
-      - source/commodity_metal
-      - source/commodity_metal_etf
-      - source/macro_cn
     output_dir: merged
 
 # ── 阶段二.四：可交易性过滤 merged CSV → filtered CSV ─────────────────────

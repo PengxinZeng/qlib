@@ -15,17 +15,42 @@
     python scripts/verify_inference_repro.py \
         --experiment mlp_all_weather_alpha158_zscore_seed1 \
         --run-id 0442c539bdc54a4da8793374a34e7b20 \
-        [--data-base D:/Pengxin/CodeBase/Quant/QuantDataBank/all_weather_data/qlib_all_weather]
+        [--data-base D:/Pengxin/CodeBase/Quant/QuantDataBank/all_weather_data/qlib_all_weather] \
+        [--period START,END]   # 评测指定时间段(可多次)，如 2012-05-28,2021-11-12；
+                               # 指定后不再对比 pred_orig，仅对该段做 predict+IC+回测
 """
 import argparse
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# stdout/stderr 强制 UTF-8：Windows 默认 cp936(GBK)，cmd /c 重定向写文件后按
+# UTF-8 打开会乱码（中文 print、tqdm 的 █ 块字符）。重定向到文件/管道时 reconfigure 生效。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError, OSError):
+        pass
 
 # 线程数限制（与 run_qrun_cached 一致）
 for _var in ("NUMEXPR_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ.setdefault(_var, "4")
+
+# 屏蔽无害警告，保持日志干净：
+#  - Gym 弃用提示（qlib 导入 gym 时刷屏，×N）
+#  - mlflow 文件存储 FutureWarning（弃用预告，不影响功能）
+#  - numpy 协方差 RuntimeWarning（单日样本≤2 时算 IC，属小截面数据特性）
+#  - pandas ConstantInputWarning（某日所有 ETF 收益相同）
+# 说明：这些均为数据缺失/弃用提示，不影响任何指标，仅用于美化日志。
+os.environ.setdefault("PYTHONWARNINGS", "ignore")
+os.environ["GIT_PYTHON_REFRESH"] = "quiet"
+warnings.filterwarnings("ignore")
+import logging
+
+# 屏蔽 gym 的 stdout 弃用提示（qlib 生态遗留，无法卸载 gym 时只能屏蔽）
+logging.getLogger("gym").setLevel(logging.ERROR)
 
 import numpy as np
 import pandas as pd
@@ -45,12 +70,104 @@ def load_recorder(args):
     return rec
 
 
+def run_record_chain(model, dataset, task_config, start, end, exp_name, full_records=False):
+    """
+    复用 yaml 的 record 链完成评测，零手动 predict/IC/回测代码。
+
+    原理：record 链（SignalRecord→SignalDetailRecord→SigAnaRecord→PortAnaRecord→ReportRecord）
+    的时间范围由 dataset.segments["test"] 驱动，因此只需把 test 段改为 [start, end]，
+    然后按 qlib 官方 trainer 的方式实例化 record 并逐个 generate()。
+
+    参数
+    ----
+    full_records: bool
+        True  → 跑 yaml 全部 record（含 SignalDetailRecord/ReportRecord 图表，慢）
+        False → 轻量：仅 SignalRecord + PortAnaRecord（与旧版手动评测等价，快）
+    返回：recorder（供读取 mlflow metrics）
+    """
+    from qlib.workflow import R
+    from qlib.utils import init_instance_by_config, fill_placeholder
+
+    # 1) 改 test 段 → record 链（SignalRecord.predict 等）自动跟随自定义区间
+    dataset.segments["test"] = [start, end]
+
+    # 2) 开 recorder，依 yaml 顺序跑 record 链
+    with R.start(experiment_name=exp_name):
+        rec = R.get_recorder()
+        rec.save_objects(**{"params.pkl": model, "dataset": dataset, "task": task_config})
+
+        records = task_config.get("record", [])
+        if isinstance(records, dict):
+            records = [records]
+
+        # 先替换占位符（<MODEL>/<DATASET>/<PRED>），与 qlib.model.trainer._exe_task 一致
+        placeholder_value = {"<MODEL>": model, "<DATASET>": dataset}
+        records = fill_placeholder(records, placeholder_value)
+
+        for record_cfg in records:
+            cls_name = record_cfg.get("class")
+            # 轻量模式：跳过图表/详情类 record
+            if not full_records and cls_name in ("SignalDetailRecord", "ReportRecord"):
+                print(f"  [skip] {cls_name}（轻量模式，加 --full-records 启用）")
+                continue
+
+            # 与 qlib.model.trainer._exe_task 相同的实例化方式
+            r = init_instance_by_config(
+                record_cfg,
+                recorder=rec,
+                default_module="qlib.workflow.record_temp",
+                try_kwargs={"model": model, "dataset": dataset},
+            )
+            # PortAnaRecord：显式覆盖回测窗口为 [start, end]
+            if cls_name == "PortAnaRecord":
+                r.backtest_config["start_time"] = start
+                r.backtest_config["end_time"] = end
+                print(f"  [run ] {cls_name}  (backtest {start} ~ {end})")
+            else:
+                print(f"  [run ] {cls_name}")
+            r.generate()
+
+    return rec
+
+
+def evaluate_period(model, dataset, task_config, start, end, exp_name, full_records=False):
+    """对指定时间段 [start, end] 评测：完全复用 record 链。返回指标 dict。"""
+    print(f"\n{'=' * 70}")
+    print(f"评测时间段: {start} ~ {end}  (record 链: {'完整' if full_records else '轻量'})")
+    print('=' * 70)
+
+    rec = run_record_chain(model, dataset, task_config, start, end, exp_name, full_records)
+
+    # 从 mlflow metrics 读取（PortAnaRecord/SigAnaRecord 已写入）
+    m = rec.list_metrics()
+    metrics = {"start": start, "end": end}
+    for k, v in m.items():
+        # 保留非 step 标量指标（IC/Rank IC/回测等），忽略训练曲线（带 step 后缀）
+        metrics[k] = v
+    return metrics
+
+
 def main():
     parser = argparse.ArgumentParser(description="验证模型重新推理评测与第一次是否一致")
     parser.add_argument("--experiment", required=True, help="mlflow 实验名")
     parser.add_argument("--run-id", required=True, help="mlflow run id（recorder id）")
     parser.add_argument("--data-base", default=None, help="provider_uri；默认用 QLIB_DATA_BASE 环境变量")
+    parser.add_argument("--period", action="append", default=None, metavar="START,END",
+                        help="评测指定时间段(可多次)，如 --period 2012-05-28,2021-11-12")
+    parser.add_argument("--full-records", action="store_true", default=False,
+                        help="跑 yaml 全部 record（含 SignalDetailRecord/ReportRecord 图表）；默认轻量(SignalRecord+PortAnaRecord)")
+    parser.add_argument("--eval-exp", default=None,
+                        help="评测结果写入的 mlflow 实验名（默认 <原experiment>_eval）")
+    parser.add_argument("--yaml", default=None,
+                        help="workflow yaml 路径（覆盖 record 列表，取 yaml 里的完整 record 链；默认用 run 历史快照）")
     args = parser.parse_args()
+    periods = []
+    if args.period:
+        for p in args.period:
+            s, e = p.split(",")
+            periods.append((s.strip(), e.strip()))
+
+    eval_exp = args.eval_exp or (args.experiment + "_eval")
 
     provider_uri = args.data_base or os.environ.get(
         "QLIB_DATA_BASE", "D:/Pengxin/CodeBase/Quant/QuantDataBank"
@@ -77,6 +194,35 @@ def main():
     task_config = replace_task_handler_with_cache(task_config, cache_dir=cache_dir)
     dataset = init_instance_by_config(task_config["dataset"])
     print(f"== dataset 重建完成: {type(dataset).__name__}, handler={type(dataset.handler).__name__} ==")
+
+    # 2.5) record 列表：优先用当前 yaml 的 record（历史 run 快照可能缺失后来新增的 record，
+    #      如 SignalDetailRecord/ReportRecord）。找不到 yaml 时退回历史快照。
+    if args.yaml:
+        from qlib.cli.run import load_config as qrun_load_config
+
+        yaml_cfg = qrun_load_config(args.yaml)
+        yaml_records = yaml_cfg.get("task", {}).get("record", [])
+        if yaml_records:
+            task_config["record"] = yaml_records
+            print(f"== 使用 yaml record 列表 ({len(yaml_records)} 个): "
+                  f"{[r.get('class') for r in yaml_records]} ==")
+    else:
+        print(f"== 使用 run 历史快照 record: {[r.get('class') for r in task_config.get('record', [])]} "
+              f"(提示: 传 --yaml 可用当前配置文件里的 record 列表) ==")
+
+    # 若指定了时间段，走多段评测（不对比 pred_orig）
+    if periods:
+        all_metrics = []
+        for start, end in periods:
+            m = evaluate_period(model, dataset, task_config, start, end, eval_exp, args.full_records)
+            all_metrics.append(m)
+        print(f"\n{'=' * 70}\n多段评测汇总\n{'=' * 70}")
+        import pprint
+
+        pprint.pprint(all_metrics)
+        print(f"\n评测实验: {eval_exp}  (run 数 = {len(all_metrics)})")
+        print("\n==== 评测完成 ====")
+        return
 
     # 3) 用训练好的模型重新推理 test 段
     pred_re = model.predict(dataset, segment="test")

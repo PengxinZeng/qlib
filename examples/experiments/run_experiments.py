@@ -36,8 +36,14 @@ from qlib.model.trainer import task_train
 # ──────────────────────────────────────────────────────────────
 
 def _load_yaml(path: Path) -> dict:
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+    # 复用 qlib 的 load_config：渲染 {{ ENV }} 模板 + 处理 BASE_CONFIG_PATH，
+    # 与 qrun 行为完全一致（直接用 yaml.safe_load 会得到未渲染的模板字符串）
+    try:
+        from qlib.cli.run import load_config
+        return load_config(str(path))
+    except Exception:
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
 
 
 def _resolve(base_dir: Path, p: str) -> Path:
@@ -50,7 +56,13 @@ def load_runner_config(config_path: Path):
     base_dir = config_path.parent
     configs = []
     for item in cfg["configs"]:
-        configs.append({"alias": item["alias"], "path": _resolve(base_dir, item["path"])})
+        configs.append({
+            "alias": item["alias"],
+            "path": _resolve(base_dir, item["path"]),
+            # 可选：不重新训练，从 mlflow 加载已训练模型评测
+            #   pretrained: {experiment: <exp_name>, run_id: <rid>}
+            "pretrained": item.get("pretrained"),
+        })
     regimes = cfg["regimes"]
     output_dir = _resolve(base_dir, cfg.get("output_dir", "results"))
     keep_records = cfg.get("keep_records")
@@ -81,6 +93,9 @@ def build_task(base_config: dict, regime: dict, keep_records):
     # 3) 可选裁剪 records 提速
     if keep_records:
         task["record"] = [r for r in task.get("record", []) if r.get("class") in keep_records]
+
+    # 4) 附带 qlib_init（pretrained 评测需 provider_uri/region 初始化数据）
+    task["_qlib_init"] = cfg.get("qlib_init", {})
 
     return task, cfg.get("qlib_init", {})
 
@@ -122,6 +137,81 @@ def collect_metrics(recorder) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────
+# 不重新训练：加载已训练模型，仅对新 test 段评测
+# ──────────────────────────────────────────────────────────────
+
+def evaluate_pretrained(pretrained: dict, task: dict, exp_name: str, uri_folder: str = "mlruns"):
+    """
+    从 mlflow 加载已训练模型（params.pkl），只对新 test 段做预测 + 回测，不训练。
+
+    流程：
+      1. qlib.init（同 qrun，file mlruns + 配置里的 provider_uri/region）
+      2. 从 pretrained.experiment 加载 run 的模型 params.pkl
+      3. 用 task 构建 dataset（handler 缓存命中则复用，新 test 段）
+      4. 新建 recorder（exp_name），SignalRecord 预测 → PortAnaRecord 回测
+      5. 返回 recorder（供 collect_metrics）
+
+    pretrained: {"experiment": str, "run_id": str|None}
+      - experiment: mlflow 实验名
+      - run_id: 指定 run；None 时取该实验最新 FINISHED run
+    """
+    from pathlib import Path
+    import os
+    from qlib.workflow import R
+    from qlib.workflow.record_temp import SignalRecord, PortAnaRecord
+    from qlib.utils import init_instance_by_config
+    from qlib.config import C
+
+    # 1) qlib.init：provider_uri/region 来自配置的 qlib_init（与 qrun 一致），
+    #    否则会用默认 ~/.qlib/qlib_data/cn_data 导致数据不存在
+    qlib_init_cfg = task.get("_qlib_init", {})
+    init_kwargs = {k: v for k, v in qlib_init_cfg.items() if k != "exp_manager"}
+    if "exp_manager" in qlib_init_cfg:
+        init_kwargs["exp_manager"] = qlib_init_cfg["exp_manager"]
+    else:
+        exp_manager = C["exp_manager"]
+        exp_manager["kwargs"]["uri"] = "file:" + str(Path(os.getcwd()).resolve() / uri_folder)
+        init_kwargs["exp_manager"] = exp_manager
+    qlib.init(**init_kwargs)
+
+    # 2) 加载已训练模型
+    src_exp = R.get_exp(experiment_name=pretrained["experiment"])
+    rid = pretrained.get("run_id")
+    if rid:
+        src_rec = src_exp.get_recorder(recorder_id=rid)
+    else:
+        recs = src_exp.list_recorders()
+        finished = [r for r in recs.values() if r.info.get("status") == "FINISHED"]
+        src_rec = finished[-1] if finished else list(recs.values())[-1]
+    model = src_rec.load_object("params.pkl")
+    print(f"  加载预训练模型: {pretrained['experiment']}/{src_rec.info['id']}")
+
+    # 3) 构建 dataset（新 test 段）
+    dataset = init_instance_by_config(task["dataset"])
+    print(f"  dataset 构建完成: handler={type(dataset.handler).__name__}")
+
+    # 4) 新建 recorder 并评测
+    with R.start(experiment_name=exp_name):
+        recorder = R.get_recorder()
+        recorder.save_objects(**{"params.pkl": model, "dataset": dataset, "task": task})
+
+        # SignalRecord：model.predict(dataset, "test") → pred.pkl
+        SignalRecord(model=model, dataset=dataset, recorder=recorder).generate()
+
+        # PortAnaRecord：回测（config 取自 task 的 record，含新 test 窗口）
+        port_cfg = None
+        for rec_cfg in task.get("record", []):
+            if rec_cfg.get("class") == "PortAnaRecord":
+                port_cfg = rec_cfg["kwargs"]["config"]
+                break
+        if port_cfg is None:
+            raise ValueError("task 中无 PortAnaRecord 配置，无法回测")
+        PortAnaRecord(recorder=recorder, config=port_cfg).generate()
+
+    return recorder
+
+
+# ──────────────────────────────────────────────────────────────
 # 主流程
 # ──────────────────────────────────────────────────────────────
 
@@ -153,24 +243,30 @@ def main():
         for regime_name, regime in regimes.items():
             alias = c["alias"]
             exp_name = f"{alias}_{regime_name}"
-            print(f"\n{'='*70}\nRUN: {exp_name}  (config={c['path'].name}, test={regime['test']})\n{'='*70}")
+            mode = "PRETRAINED" if c.get("pretrained") else "TRAIN"
+            print(f"\n{'='*70}\nRUN: {exp_name}  [{mode}]  (config={c['path'].name}, test={regime['test']})\n{'='*70}")
 
             row = {"alias": alias, "regime": regime_name, "test_start": regime["test"][0],
-                   "test_end": regime["test"][1]}
+                   "test_end": regime["test"][1], "mode": mode}
             try:
                 task, qlib_init = build_task(base_config, regime, keep_records)
                 # 落盘 resolved 配置便于追溯
-                with open(resolved_dir / f"{exp_name}.yaml", "w") as f:
+                with open(resolved_dir / f"{exp_name}.yaml", "w", encoding="utf-8") as f:
                     yaml.safe_dump({"qlib_init": qlib_init, "task": task}, f, allow_unicode=True, sort_keys=False)
 
-                qlib.init(**qlib_init)
-                recorder = task_train(task, experiment_name=exp_name)
+                if c.get("pretrained"):
+                    # 不重新训练：加载已训练模型，仅对新 test 段评测
+                    recorder = evaluate_pretrained(c["pretrained"], task, exp_name)
+                else:
+                    qlib.init(**qlib_init)
+                    recorder = task_train(task, experiment_name=exp_name)
                 row.update(collect_metrics(recorder))
                 row["status"] = "ok"
             except Exception as e:  # noqa: BLE001
                 row["status"] = "failed"
                 row["error"] = str(e)
-                print(f"  ✗ {exp_name} failed: {e}")
+                # 用 ASCII 标记，避免 GBK 控制台无法打印 ✗ 导致 UnicodeEncodeError
+                print(f"  [FAIL] {exp_name} failed: {e}")
             rows.append(row)
 
     df = pd.DataFrame(rows)
